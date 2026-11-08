@@ -1,0 +1,58 @@
+# Public boundary check. The validator and its rules always come from the
+# trusted checkout (for pull requests, the base branch). Pull-request content is
+# read as Git objects only and never checked out or executed. Read-only token,
+# no secrets, no caches. Third-party actions are pinned by full commit SHA.
+name: Public boundary
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      fetch-links:
+        description: Also fetch every external link in the documentation
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: read
+
+jobs:
+  boundary:
+    name: Public boundary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: read
+    steps:
+      - name: Check out the trusted validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Test the trusted validator
+        run: node --test trusted/.boundary/test/
+
+      - name: Check the boundary
+        env:
+          EVENT: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+          FETCH_LINKS: ${{ inputs.fetch-links }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node trusted/.boundary/workflow.mjs

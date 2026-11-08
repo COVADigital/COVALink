@@ -1,0 +1,15 @@
+{
+  "prefixes": [
+    "https://github.com/COVADigital/COVALink",
+    "https://ghcr.io/covadigital/",
+    "https://www.apache.org/licenses/",
+    "https://docs.github.com/",
+    "https://coolify.io/docs",
+    "https://nodejs.org/",
+    "https://openfontlicense.org/",
+    "https://docs.usesend.com/",
+    "https://docs.aws.amazon.com/ses/",
+    "https://gitlab.alpinelinux.org/alpine/aports",
+    "https://github.com/lovell/sharp-libvips"
+  ]
+}

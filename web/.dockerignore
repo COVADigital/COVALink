@@ -1,0 +1,35 @@
+# Build context for web/Dockerfile. Only source needed by `npm ci` and
+# `next build` is sent; secrets, local state and test material never are.
+
+# Environment files (secrets). The documented example is harmless.
+.env*
+!.env.example
+
+# Dependencies and build output: installed and built inside Linux.
+node_modules
+.next
+out
+build
+*.tsbuildinfo
+next-env.d.ts
+
+# Local runtime data (uploaded media) and test material.
+data
+tests
+test-results
+playwright-report
+blob-report
+coverage
+.vitest
+
+# Repository and editor metadata.
+.git
+.gitignore
+.vscode
+.idea
+*.log
+*.pem
+*.key
+*.p12
+Dockerfile
+.dockerignore

@@ -1,0 +1,248 @@
+[
+  {
+    "path": "compose.prod.yaml",
+    "check": "P-9",
+    "token": "17.11-alpine3.24@sha256",
+    "reason": "container image reference pinned by its sha256 digest, not an email address"
+  },
+  {
+    "path": "ops/lib.sh",
+    "check": "P-9",
+    "token": "17.11-alpine3.24@sha256",
+    "reason": "container image reference pinned by its sha256 digest, not an email address"
+  },
+  {
+    "path": "web/.env.example",
+    "check": "P-9",
+    "token": "covalink_dev@127.0.0.1",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/Dockerfile",
+    "check": "P-9",
+    "token": "24.22.2-alpine3.24@sha256",
+    "reason": "container image reference pinned by its sha256 digest, not an email address"
+  },
+  {
+    "path": "web/package-lock.json",
+    "check": "P-7",
+    "token": "U4",
+    "reason": "substring of a base64 package integrity hash, not an identifier"
+  },
+  {
+    "path": "web/package-lock.json",
+    "check": "P-7",
+    "token": "V7",
+    "reason": "substring of a base64 package integrity hash, not an identifier"
+  },
+  {
+    "path": "web/scripts/run-e2e.mjs",
+    "check": "P-9",
+    "token": "not-a-secret@127.0.0.1",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/scripts/verify-offline-build.mjs",
+    "check": "P-9",
+    "token": "not-a-secret@127.0.0.1",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/deploy/smoke.mjs",
+    "check": "P-9",
+    "token": "/home/node",
+    "reason": "path inside the container image (the node user's home directory), not a workstation path"
+  },
+  {
+    "path": "web/tests/deploy/smoke.mjs",
+    "check": "P-9",
+    "token": "17.11-alpine3.24@sha256",
+    "reason": "container image reference pinned by its sha256 digest, not an email address"
+  },
+  {
+    "path": "web/tests/deploy/smoke.mjs",
+    "check": "P-9",
+    "token": "C:\\\\Program",
+    "reason": "default Git for Windows bash location (Program Files) used by the smoke test on Windows, not a personal path"
+  },
+  {
+    "path": "web/tests/deploy/smoke.mjs",
+    "check": "P-9",
+    "token": "not-a-secret@127.0.0.1",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/integration/account.test.ts",
+    "check": "P-9",
+    "token": "alice@example",
+    "reason": "made-up test data, not a real address"
+  },
+  {
+    "path": "web/tests/integration/contact-social-blocks.test.ts",
+    "check": "P-9",
+    "token": "p@github.com",
+    "reason": "test input URL with embedded credentials, used to check that such URLs are refused"
+  },
+  {
+    "path": "web/tests/integration/embed-blocks.test.ts",
+    "check": "P-9",
+    "token": "user@www.youtube.com",
+    "reason": "test input URL with embedded credentials, used to check that such URLs are refused"
+  },
+  {
+    "path": "web/tests/integration/image-blocks.test.ts",
+    "check": "P-9",
+    "token": "p@ex",
+    "reason": "test input URL with embedded credentials, used to check that such URLs are refused"
+  },
+  {
+    "path": "web/tests/integration/readiness.test.ts",
+    "check": "P-9",
+    "token": "secret@127.0.0.1",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/account.test.ts",
+    "check": "P-9",
+    "token": "ada@example",
+    "reason": "made-up test data, not a real address"
+  },
+  {
+    "path": "web/tests/unit/account.test.ts",
+    "check": "P-9",
+    "token": "pw@db",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/admin.test.ts",
+    "check": "P-9",
+    "token": "e@x",
+    "reason": "made-up test data, not a real address"
+  },
+  {
+    "path": "web/tests/unit/admin.test.ts",
+    "check": "P-9",
+    "token": "p@h",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/contact-social-blocks.test.ts",
+    "check": "P-9",
+    "token": "neil+news@example.co.uk",
+    "reason": "made-up test data, not a real address"
+  },
+  {
+    "path": "web/tests/unit/deploy-readiness.test.ts",
+    "check": "P-9",
+    "token": "s3cret-pass@db",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/embed-blocks.test.ts",
+    "check": "P-9",
+    "token": "pw@youtube.com",
+    "reason": "test input URL with embedded credentials, used to check that such URLs are refused"
+  },
+  {
+    "path": "web/tests/unit/error-summary.test.ts",
+    "check": "P-9",
+    "token": "p@h",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/error-summary.test.ts",
+    "check": "P-9",
+    "token": "p@ss",
+    "reason": "password test value used to check that error messages are redacted, not an email address"
+  },
+  {
+    "path": "web/tests/unit/error-summary.test.ts",
+    "check": "P-9",
+    "token": "p@ss-w0rd-SECRET",
+    "reason": "password test value used to check that error messages are redacted, not an email address"
+  },
+  {
+    "path": "web/tests/unit/error-summary.test.ts",
+    "check": "P-9",
+    "token": "p%40ss-w0rd-SECRET@db.internal",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/media.test.ts",
+    "check": "P-9",
+    "token": "C:\\\\Users\\\\me\\\\..\\\\secret.png",
+    "reason": "path-traversal test fixture, not a real path"
+  },
+  {
+    "path": "web/tests/unit/production-config.test.ts",
+    "check": "P-9",
+    "token": "p@db",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/production-config.test.ts",
+    "check": "P-9",
+    "token": "s3cret-pass@db",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/production-config.test.ts",
+    "check": "P-9",
+    "token": "u@10.0.0.5",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/readiness.test.ts",
+    "check": "P-9",
+    "token": "s3cr3t-password@db.internal",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/test-db-guard.test.ts",
+    "check": "P-9",
+    "token": "covalink_dev@127.0.0.1",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "web/tests/unit/test-db-guard.test.ts",
+    "check": "P-9",
+    "token": "pw@127.0.0.1",
+    "reason": "test or example database URL with placeholder credentials, not an email address"
+  },
+  {
+    "path": "docs/DEPLOYMENT.md",
+    "check": "P-9",
+    "token": "17.11-alpine3.24@sha256",
+    "reason": "container image reference pinned by its sha256 digest, not an email address"
+  },
+  {
+    "path": "docs/DEPLOYMENT.md",
+    "check": "P-9",
+    "token": "24.22.2-alpine3.24@sha256",
+    "reason": "container image reference pinned by its sha256 digest, not an email address"
+  },
+  {
+    "path": "docs/DEPLOYMENT.md",
+    "check": "P-9",
+    "token": "covalink-hsts@file",
+    "reason": "Traefik middleware reference (a middleware name and its provider), not an email address"
+  },
+  {
+    "path": "docs/DEVELOPMENT.md",
+    "check": "P-9",
+    "token": "24.22.2-alpine3.24@sha256",
+    "reason": "container image reference pinned by its sha256 digest, not an email address"
+  },
+  {
+    "path": ".github/workflows/boundary.yml",
+    "check": "P-9",
+    "token": "checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "reason": "GitHub Actions action reference pinned to a full commit SHA, not an email address"
+  },
+  {
+    "path": ".github/workflows/boundary.yml",
+    "check": "P-9",
+    "token": "setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
+    "reason": "GitHub Actions action reference pinned to a full commit SHA, not an email address"
+  }
+]

@@ -1,0 +1,7 @@
+# Shell scripts run with bash on Linux hosts (and Git Bash on Windows); a CRLF
+# checkout (core.autocrlf=true) would break them.
+*.sh text eol=lf
+
+# Generated, and holds verbatim upstream license texts whose own indentation
+# mixes spaces and tabs. Whitespace checks stay active everywhere else.
+web/THIRD_PARTY_NOTICES.txt -whitespace

@@ -1,0 +1,10 @@
+# Isolated local verification ONLY (tests/deploy/smoke.mjs). Never deploy with it.
+#   docker compose -p covalink-smoke-<id> -f compose.prod.yaml -f compose.smoke.yaml --env-file <throwaway> up -d
+# Publishes the app on 127.0.0.1 only, and accepts the http loopback APP_URL
+# that the production start-up validator otherwise refuses.
+services:
+  app:
+    ports:
+      - "127.0.0.1:${SMOKE_PORT:?SMOKE_PORT is required}:3000"
+    environment:
+      COVALINK_ALLOW_LOOPBACK_APP_URL: "true"

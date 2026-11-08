@@ -1,0 +1,162 @@
+# COVALink production stack for Docker Compose and Coolify. Single replica.
+#
+#   db       PostgreSQL 17 (pinned), internal network only, no published port.
+#   migrate  one-shot: the SAME image as app, running `node scripts/migrate.mjs`.
+#   app      the Next.js server; starts only after db is healthy and migrate
+#            has completed successfully. Port 3000 is reachable on the
+#            Compose network only (Coolify's Traefik routes to it).
+#
+# Known Coolify behavior: its resource network and .env reach every service,
+# so db and migrate also get outbound access and secrets they don't use. The
+# isolation below is what this file declares, and what a plain Compose host
+# gets.
+#
+# Every setting comes from the environment: Coolify's environment store, or
+# for a plain host `docker compose --env-file <untracked file>`. Nothing secret
+# is written here. See docs/DEPLOYMENT.md. Local isolated verification adds
+# compose.smoke.yaml (publishes the app on 127.0.0.1 only).
+#
+# Required variables are bare `${VAR:?}` on purpose: Coolify stores any text
+# after `:?` as the variable's initial value, so a message could become a known
+# password or secret.
+
+x-hardening: &hardening
+  read_only: true
+  # Private IPC namespace without /dev/shm, so nothing outside the declared
+  # tmpfs mounts and the media volume is writable.
+  ipc: none
+  init: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+# Coolify generates this SERVICE_* value once and persists it. Plain Compose
+# operators set the same variable in their private env file. The bare `:?`
+# keeps missing or empty passwords a configuration error on either platform.
+x-database-password: &database-password "${SERVICE_PASSWORD_64_POSTGRES:?}"
+x-database-url: &database-url "postgresql://${POSTGRES_USER:-covalink}:${SERVICE_PASSWORD_64_POSTGRES:?}@db:5432/${POSTGRES_DB:-covalink}"
+
+services:
+  db:
+    image: postgres:17.11-alpine3.24@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-covalink}
+      # URL-safe characters only (it is embedded in DATABASE_URL), e.g. `openssl rand -hex 32`.
+      POSTGRES_PASSWORD: *database-password
+      POSTGRES_DB: ${POSTGRES_DB:-covalink}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 60s
+    mem_limit: ${DB_MEMORY_LIMIT:-512m}
+    cpus: ${DB_CPUS:-1}
+    pids_limit: ${DB_PIDS_LIMIT:-256}
+
+  migrate:
+    # The image built for `app` below (same tag, so the same image ID); never pulled.
+    image: ${COVALINK_IMAGE:-covalink}:${COVALINK_IMAGE_TAG:-local}
+    pull_policy: never
+    command: ["node", "scripts/migrate.mjs"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: *database-url
+    networks: [backend]
+    <<: *hardening
+    mem_limit: 256m
+    pids_limit: 64
+
+  app:
+    image: ${COVALINK_IMAGE:-covalink}:${COVALINK_IMAGE_TAG:-local}
+    build:
+      context: ./web
+      args:
+        GIT_SHA: ${COVALINK_IMAGE_TAG:-local}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      # The public https origin, e.g. https://links.example.com.
+      APP_URL: ${APP_URL:?}
+      DATABASE_URL: *database-url
+      # 32+ random characters.
+      # Coolify generates this value; plain Compose operators set the same name.
+      BETTER_AUTH_SECRET: "${SERVICE_BASE64_64_AUTHSECRET:?}"
+      # Coolify generates this value; plain Compose operators set the same name.
+      # Setup remains one-shot because the database bootstrap invariant refuses
+      # every later attempt, even though the token stays configured.
+      SETUP_TOKEN: "${SERVICE_BASE64_64_SETUPTOKEN:?}"
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
+      REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-false}
+      MAX_PROFILES_PER_USER: ${MAX_PROFILES_PER_USER:-5}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_PATH: /data/uploads
+      MEDIA_QUOTA_MB: ${MEDIA_QUOTA_MB:-50}
+      MEDIA_UPLOADS_PER_HOUR: ${MEDIA_UPLOADS_PER_HOUR:-30}
+      ANALYTICS_RETENTION_DAYS: ${ANALYTICS_RETENTION_DAYS:-395}
+      # Secure by default: false, so no client-supplied header is trusted and
+      # all clients share one rate-limit bucket per auth endpoint. Set true
+      # ONLY after verifying that the proxy in front (e.g. Coolify's Traefik)
+      # overwrites X-Forwarded-For and X-Real-IP, and that port 3000 can't be
+      # reached except through it (docs/DEPLOYMENT.md "TRUST_PROXY"). Behind
+      # any other proxy, true lets clients spoof their address and evade
+      # per-client rate limits.
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    expose: ["3000"]
+    volumes:
+      - media:/data/uploads
+    networks: [backend, edge]
+    <<: *hardening
+    tmpfs:
+      # libvips may spill large decodes to TMPDIR; tmpfs pages count against mem_limit.
+      - /tmp:size=${APP_TMP_SIZE:-256m},mode=0700,uid=1000,gid=1000
+      - /app/.next/cache:size=${APP_NEXT_CACHE_SIZE:-64m},mode=0700,uid=1000,gid=1000
+    # Sized for two concurrent maximum (40 MP, 16-bit RGBA) image decodes plus
+    # the server; measured in docs/DEPLOYMENT.md "Resource limits". Lowering it
+    # can OOM legitimate uploads. No swap beyond the limit, so an overrun is a
+    # visible OOM rather than a silent slowdown.
+    mem_limit: ${APP_MEMORY_LIMIT:-1g}
+    memswap_limit: ${APP_MEMORY_LIMIT:-1g}
+    cpus: ${APP_CPUS:-2}
+    pids_limit: ${APP_PIDS_LIMIT:-256}
+    stop_grace_period: 60s
+    # Readiness gate for Coolify/Traefik (database AND writable media storage).
+    # Overrides the image's liveness HEALTHCHECK; Docker never restarts a
+    # container for being unhealthy, so a database outage withdraws traffic
+    # without a restart loop. See docs/DEPLOYMENT.md "Health checks".
+    healthcheck:
+      test: ["CMD", "node", "scripts/healthcheck.mjs", "ready"]
+      interval: 15s
+      timeout: 6s
+      retries: 3
+      start_period: 30s
+
+networks:
+  # No route out: PostgreSQL and the migrator can only talk to each other and app.
+  # Coolify attaches its own resource network as well (see the header).
+  backend:
+    internal: true
+  # app's route to the reverse proxy and to SMTP.
+  edge: {}
+
+volumes:
+  pgdata:
+  media:

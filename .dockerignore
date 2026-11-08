@@ -1,0 +1,33 @@
+# Defensive ignore rules in case the repository root is ever used as a Docker
+# build context. The supported build context is ./web (compose.prod.yaml),
+# which keeps reference/ structurally outside the context.
+
+# Local reference material is never part of a build context.
+reference
+
+# Environment files and keys (secrets).
+**/.env*
+!**/.env.example
+**/*.pem
+**/*.key
+**/*.p12
+
+# Dependencies, build output and local runtime data.
+**/node_modules
+**/.next
+**/out
+**/build
+**/*.tsbuildinfo
+**/data
+backups
+
+# Tests and test output.
+**/tests
+**/test-results
+**/playwright-report
+**/blob-report
+**/coverage
+
+# Repository metadata and documentation.
+.git
+docs

@@ -1,0 +1,30 @@
+# Local development services only (PostgreSQL + Mailpit).
+# Run the Next.js dev server directly on the host: see docs/DEVELOPMENT.md
+name: covalink-dev
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: covalink
+      POSTGRES_PASSWORD: covalink_dev # local-only credential, never used in production
+      POSTGRES_DB: covalink
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U covalink -d covalink"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mail:
+    # Catches all outgoing SMTP mail; web UI at http://localhost:8025
+    image: axllent/mailpit:v1.27
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+
+volumes:
+  pgdata:

@@ -1,0 +1,33 @@
+{
+  "files": [
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "web/LICENSE",
+    "web/NOTICE",
+    "web/THIRD_PARTY_NOTICES.txt",
+    "web/CORRESPONDING_SOURCE.md",
+    "web/public/licenses/fonts/README.txt",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "docs/DEPLOYMENT.md",
+    "docs/CONFIGURATION.md",
+    "docs/BACKUP_RESTORE.md",
+    "docs/USAGE.md",
+    "docs/DEVELOPMENT.md",
+    "docs/EMAIL_DELIVERY.md"
+  ],
+  "globs": [
+    "web/public/licenses/fonts/*-OFL.txt"
+  ],
+  "mirrors": [
+    [
+      "LICENSE",
+      "web/LICENSE"
+    ],
+    [
+      "NOTICE",
+      "web/NOTICE"
+    ]
+  ]
+}

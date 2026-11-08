@@ -1,0 +1,17 @@
+# gitleaks configuration: the default rules, plus one reviewed allowlist.
+title = "COVALink"
+
+[extend]
+useDefault = true
+
+# Uploaded-media storage keys are random UUIDs with a .webp extension. The test
+# suites use fixed example keys as fixtures, and the generic-api-key rule reads
+# the assignment as a key. They aren't credentials. The allowlist matches only
+# that rule, only a UUID-shaped .webp key, and only under web/tests/.
+[[allowlists]]
+description = "Uploaded-media key fixtures in tests (UUID.webp), not credentials"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^web/tests/''']
+regexTarget = "match"
+regexes = ['''[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webp''']

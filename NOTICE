@@ -1,0 +1,15 @@
+COVALink
+Copyright 2026 Joseph Bain
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this software except in compliance with the License. A copy of the License
+is in the LICENSE file.
+
+COVALink includes third-party software. The user-interface components in the
+web/src/components/ui directory are adapted from shadcn/ui, Copyright (c) 2023
+shadcn, used under the MIT License. THIRD_PARTY_NOTICES.txt in the web
+directory contains the license declarations and notice texts collected for
+this source snapshot, and the font licenses are in the web/public/licenses/fonts
+directory. Complete notices for a published container image, including the
+copyright notices of the libraries built into its components, are completed,
+together with the corresponding source bundles, before any image is published.
