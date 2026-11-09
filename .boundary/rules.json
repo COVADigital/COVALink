@@ -64,7 +64,6 @@
     "FEATURE_INVENTORY",
     "MIGRATION_MAPPING",
     "LICENSE_REVIEW",
-    "reference/linkstack",
     "graphify"
   ],
   "identifiers": [

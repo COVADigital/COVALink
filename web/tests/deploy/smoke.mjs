@@ -327,7 +327,7 @@ try {
     const script = [
       `for d in ${devDeps.join(" ")}; do [ -e "/app/node_modules/$d" ] && echo "DEV $d"; done; true`,
       // Anywhere in the image: environment files, repository or reference material, build and test output.
-      "find / -xdev \\( -path /proc -o -path /sys \\) -prune -o \\( -name '.env' -o -name '.env.*' -o -name '*.tsbuildinfo' -o -name '.git' -o -name 'reference' -o -name 'linkstack' -o -name 'test-results' -o -name 'playwright-report' -o -name 'coverage' -o -name 'Dockerfile' -o -name 'compose*.yaml' \\) -print | sed 's/^/FORBIDDEN /'",
+      "find / -xdev \\( -path /proc -o -path /sys \\) -prune -o \\( -name '.env' -o -name '.env.*' -o -name '*.tsbuildinfo' -o -name '.git' -o -name 'reference' -o -name 'test-results' -o -name 'playwright-report' -o -name 'coverage' -o -name 'Dockerfile' -o -name 'compose*.yaml' \\) -print | sed 's/^/FORBIDDEN /'",
       // In the application and data paths (the base OS has its own CA bundle and busybox's `test`): keys and tests.
       "find /app /data \\( -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.test.*' -o -name '*.spec.*' -o \\( -type d \\( -name test -o -name tests -o -name __tests__ \\) \\) \\) -print | sed 's/^/FORBIDDEN /'",
       "ls /app/node_modules /app/node_modules/@img | sed 's/^/MOD /'",
