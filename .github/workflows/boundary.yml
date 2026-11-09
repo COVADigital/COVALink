@@ -43,7 +43,7 @@ jobs:
           node-version: 24
 
       - name: Test the trusted validator
-        run: node --test trusted/.boundary/test/
+        run: node --test "trusted/.boundary/test/*.test.mjs"
 
       - name: Check the boundary
         env:

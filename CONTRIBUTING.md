@@ -39,7 +39,7 @@ For changes that affect pages or HTTP behavior, also run `npm run build`, then `
 
 ```sh
 node .boundary/check.mjs --dir .
-node --test .boundary/test/
+node --test ".boundary/test/*.test.mjs"
 ```
 
 ## Pull requests
