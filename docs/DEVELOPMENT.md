@@ -79,7 +79,7 @@ Uploaded media is stored under `STORAGE_LOCAL_PATH` (default `./data/uploads`, i
 | End-to-end and browser suites against the production image | `E2E_SERVER_IMAGE=covalink:<tag> npm run test:e2e`, then the same for `test:browser` | yes, `E2E_DATABASE_URL` |
 | Deployment smoke and security checks: builds the image, runs throwaway Compose stacks, and drills backup and restore | `npm run test:deploy` (add `-- --keep` to leave the stacks up) | no; needs Docker, bash and Edge |
 | Public boundary check | `node .boundary/check.mjs --dir .` (from the repository root) | no |
-| Boundary validator tests | `node --test .boundary/test/` (from the repository root) | no |
+| Boundary validator tests | `node --test ".boundary/test/*.test.mjs"` (from the repository root) | no |
 
 - The boundary check in folder mode looks at what the repository would publish: tracked files, and untracked files that `.gitignore` doesn't exclude. Ignored files such as `web/.env` and build output aren't checked.
 - `npm run test:deploy` keeps the image it builds, so you can pass it to `E2E_SERVER_IMAGE`. With `SMOKE_PREVIOUS_TAG=<tag of the previous release image>` it also checks that the previous image still runs on the current schema. It removes every project, network and volume it creates. On Windows it runs `ops/*.sh` with Git for Windows' bash; set `SMOKE_BASH` to use another.
