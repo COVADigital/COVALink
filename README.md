@@ -2,7 +2,7 @@
 
 COVALink is a self-hosted link-in-bio platform. Each account can publish one or more public profile pages with links, text, images, contact details, social links and video or music players, styled with accessible themes. It runs as a Next.js application with PostgreSQL, packaged for Docker Compose and Coolify.
 
-COVALink is an independent project. It isn't affiliated with, or an official release of, LinkStack or any other link-in-bio product.
+COVALink is free and open-source software. It gives everyone the features that hosted link-in-bio services often reserve for paid plans, such as multiple profiles, custom themes, image uploads and visitor analytics, on a server you control.
 
 ## Features
 
