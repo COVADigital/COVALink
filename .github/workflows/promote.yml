@@ -1,0 +1,243 @@
+# Promotion: copies an approved candidate, by digest, from the private staging
+# package to the production package, then attests it. Run manually on the tag
+# v<version>, by the owner only, after the candidate review and the owner's
+# approval. The promote job runs in the "release" environment, which needs the
+# required reviewer's approval. Third-party actions are pinned by full commit SHA.
+name: Promote release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example 0.1.0. Run this workflow on the tag v<version>.
+        required: true
+        type: string
+      digest:
+        description: The approved candidate digest, sha256:<64 hex>
+        required: true
+        type: string
+      candidate_run_id:
+        description: The run ID of the candidate workflow that built and gated this digest
+        required: true
+        type: string
+      first_release:
+        description: True only for the first release, while the packages are still private
+        required: true
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: covalink-release
+  cancel-in-progress: false
+
+jobs:
+  environment-check:
+    name: Check the release environment
+    if: github.actor == 'COVADigital'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    env:
+      VERSION: ${{ inputs.version }}
+      RUN_REF: ${{ github.ref }}
+      RUN_SHA: ${{ github.sha }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Guard
+        run: bash release/guard.sh
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Confirm the release environment's protection
+        run: node release/promote-checks.mjs environment
+
+  promote:
+    name: Promote
+    needs: environment-check
+    if: github.actor == 'COVADigital'
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    outputs:
+      digest: ${{ steps.readback.outputs.digest }}
+    env:
+      VERSION: ${{ inputs.version }}
+      DIGEST: ${{ inputs.digest }}
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      FIRST_RELEASE: ${{ inputs.first_release }}
+      RUN_REF: ${{ github.ref }}
+      RUN_SHA: ${{ github.sha }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Guard
+        run: |
+          bash release/guard.sh
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "refused: digest is malformed"; exit 1; }
+          [[ "$CANDIDATE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "refused: candidate run ID is malformed"; exit 1; }
+          [[ "$FIRST_RELEASE" == true || "$FIRST_RELEASE" == false ]] || { echo "refused: first_release must be true or false"; exit 1; }
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Download the candidate report
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: candidate-report
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Confirm the candidate run and report
+        run: node release/promote-checks.mjs candidate candidate/candidate-report.json
+      - name: Read the toolchain pins
+        id: toolchain
+        run: |
+          set -a; . release/config.env; set +a
+          echo "buildkit=$BUILDKIT_IMAGE" >> "$GITHUB_OUTPUT"
+      - name: Set up Buildx (pinned BuildKit)
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=${{ steps.toolchain.outputs.buildkit }}
+      - name: Confirm the pinned toolchain is in effect
+        run: |
+          set -a; . release/config.env; set +a
+          bash release/toolchain-check.sh
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse if this release is already in production
+        run: |
+          set -a; . release/config.env; set +a
+          bash release/production-absent.sh
+      - name: Confirm this is or isn't the first release
+        run: |
+          set -euo pipefail
+          # Only a clear 404 (no production package yet) counts as "none"; any
+          # other error refuses, so an API or permission failure can't pass.
+          if out=$(gh api "/users/COVADigital/packages/container/covalink/versions" --jq length 2>&1); then
+            count=$out
+          elif grep -q 'HTTP 404' <<< "$out"; then
+            count=none
+          else
+            echo "refused: couldn't read the production package's versions: $out"; exit 1
+          fi
+          if [[ "$FIRST_RELEASE" == true ]]; then
+            [[ "$count" == none || "$count" == 0 ]] || { echo "refused: production already has versions, so this isn't the first release"; exit 1; }
+          else
+            [[ "$count" =~ ^[0-9]+$ && "$count" -gt 0 ]] || { echo "refused: production has no versions; this is the first release"; exit 1; }
+          fi
+      - name: Promote the source bundle
+        run: |
+          set -euo pipefail
+          set -a; . release/config.env; set +a
+          ref=$(node -e 'console.log(require("./candidate/candidate-report.json").source_bundle.ref)')
+          status=$(node -e 'console.log(require("./candidate/candidate-report.json").source_bundle.status)')
+          hash=$(node -e 'console.log(require("./candidate/candidate-report.json").source_bundle.manifest_sha256)')
+          s=${ref#*@}
+          [[ "$ref" == "$SOURCES_PACKAGE@$s" && "$s" =~ ^sha256:[0-9a-f]{64}$ && "$hash" =~ ^[0-9a-f]{64}$ ]] || { echo "refused: source bundle reference is malformed"; exit 1; }
+          if [[ "$status" == reused ]]; then
+            docker buildx imagetools inspect "$SOURCES_PACKAGE@$s" > /dev/null || { echo "refused: the reused bundle isn't in production"; exit 1; }
+            echo "source bundle $s reused; nothing copied"
+          else
+            docker buildx imagetools create --dry-run -t "$SOURCES_PACKAGE:manifest-$hash" -t "$SOURCES_PACKAGE:$VERSION" "$STAGING_PACKAGE@$s" > /dev/null
+            docker buildx imagetools create -t "$SOURCES_PACKAGE:manifest-$hash" -t "$SOURCES_PACKAGE:$VERSION" "$STAGING_PACKAGE@$s"
+            for t in "manifest-$hash" "$VERSION"; do
+              got="sha256:$(docker buildx imagetools inspect "$SOURCES_PACKAGE:$t" --raw | sha256sum | cut -c1-64)"
+              [[ "$got" == "$s" ]] || { echo "refused: $SOURCES_PACKAGE:$t reads back as $got"; exit 1; }
+            done
+            echo "source bundle $s copied to production"
+          fi
+          echo "BUNDLE_REF=$ref" >> "$GITHUB_ENV"
+      - name: Anonymous source retrieval (later releases)
+        if: inputs.first_release == false
+        run: |
+          set -euo pipefail
+          set -a; . release/config.env; set +a
+          out="$RUNNER_TEMP/anonymous"
+          # No registry credentials: a fresh Docker config, and retrieve.mjs uses an anonymous token.
+          DOCKER_CONFIG="$RUNNER_TEMP/no-docker-config" node release/source-bundle/retrieve.mjs "$BUNDLE_REF" "$out"
+          docker run --rm --network none -v "$out/covalink-sources:/b:ro" -v "$PWD:/repo:ro" --entrypoint node "$NODE_IMAGE" /repo/release/source-bundle/verify.mjs /b
+          want=$(node -e 'console.log(require("./candidate/candidate-report.json").source_bundle.manifest_sha256)')
+          [[ "$(sha256sum "$out/covalink-sources/MANIFEST.json" | cut -c1-64)" == "$want" ]] || { echo "refused: the public bundle's manifest isn't the candidate's"; exit 1; }
+      - name: Promote the image
+        id: readback
+        run: |
+          set -euo pipefail
+          set -a; . release/config.env; set +a
+          docker buildx imagetools create --dry-run -t "$PRODUCTION_PACKAGE:$VERSION" -t "$PRODUCTION_PACKAGE:sha-$RUN_SHA" "$STAGING_PACKAGE@$DIGEST" > /dev/null
+          docker buildx imagetools create -t "$PRODUCTION_PACKAGE:$VERSION" -t "$PRODUCTION_PACKAGE:sha-$RUN_SHA" "$STAGING_PACKAGE@$DIGEST"
+          for t in "$VERSION" "sha-$RUN_SHA"; do
+            got="sha256:$(docker buildx imagetools inspect "$PRODUCTION_PACKAGE:$t" --raw | sha256sum | cut -c1-64)"
+            [[ "$got" == "$DIGEST" ]] || { echo "FAILED: $PRODUCTION_PACKAGE:$t reads back as $got, not $DIGEST"; exit 1; }
+          done
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "promoted $DIGEST as $VERSION and sha-$RUN_SHA"
+
+  attest:
+    name: Attest
+    needs: promote
+    if: github.actor == 'COVADigital'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ inputs.version }}
+      RUN_REF: ${{ github.ref }}
+      RUN_SHA: ${{ github.sha }}
+      DIGEST: ${{ needs.promote.outputs.digest }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Guard
+        run: |
+          bash release/guard.sh
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "refused: promoted digest is malformed"; exit 1; }
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attest the production image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/covadigital/covalink
+          subject-digest: ${{ needs.promote.outputs.digest }}
+          push-to-registry: true
+      - name: Verify the attestation
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://ghcr.io/covadigital/covalink@$DIGEST" \
+            --repo COVADigital/COVALink \
+            --signer-workflow COVADigital/COVALink/.github/workflows/promote.yml \
+            --source-ref "$RUN_REF" \
+            --source-digest "$RUN_SHA"

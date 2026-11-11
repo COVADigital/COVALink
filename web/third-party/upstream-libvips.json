@@ -1,0 +1,12 @@
+{
+  "description": "The pinned upstream sharp and libvips packages the COVALink image ships unchanged. The candidate gates check the lockfile and the image against these values; a change to any of them must be reviewed and approved before release.",
+  "packages": {
+    "sharp": { "version": "0.35.5", "integrity": "sha512-Ywn4OnzGukp7CDMrp08RQ50YKmuwG47brZgIVPTvBaaAfQlRlygrRqSrxdCiL9M+LlzLBiJ68IR1QqvzHyjC7g==" },
+    "@img/sharp-linuxmusl-x64": { "version": "0.35.5", "integrity": "sha512-4KOphqB035HrVdqLZfCgMzzERrQkkzOwRhl4OAkRO1YCldbaFjySXMaK534Mo0V+LndnlJk+sbUyLeU0ULyD1A==" },
+    "@img/sharp-libvips-linuxmusl-x64": { "version": "1.3.4", "integrity": "sha512-6zXKeE/p39I1AmA3cJG35eyBGNqNddLnUXjhwBnsGjFPWqf5VKkDBEqaEkPDoTEtkxwi2vv8Tcr2mDyP4So7Fg==" }
+  },
+  "library": {
+    "path": "/app/node_modules/@img/sharp-libvips-linuxmusl-x64/lib/libvips-cpp.so.8.18.7",
+    "sha256": "979b625437190a1970b835164e0e30d47dc60159ce6a394ce78cc40cb9d59ab8"
+  }
+}

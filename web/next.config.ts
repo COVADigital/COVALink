@@ -11,9 +11,27 @@ import {
   vcardSecurityHeaders,
 } from "./src/lib/security/headers";
 
+// Release builds pass the full commit SHA (web/Dockerfile, COVALINK_BUILD_ID), so
+// two builds of one commit get the same build ID. Any other value, such as a
+// local tag, keeps Next.js's default random ID.
+const buildId = process.env.COVALINK_BUILD_ID ?? "";
+const releaseBuildId = /^[0-9a-f]{40}$/.test(buildId) ? buildId : null;
+
+// A Server Actions key supplied for a release build (a BuildKit secret, never a
+// build argument) must be a valid AES-256 key: base64 of exactly 32 bytes. The
+// key itself is never printed.
+const actionsKey = process.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY;
+if (actionsKey !== undefined && actionsKey !== "") {
+  const bytes = Buffer.from(actionsKey, "base64");
+  if (bytes.length !== 32 || bytes.toString("base64") !== actionsKey) {
+    throw new Error("NEXT_SERVER_ACTIONS_ENCRYPTION_KEY must be the base64 encoding of exactly 32 bytes");
+  }
+}
+
 const nextConfig: NextConfig = {
   // Self-contained server for the production image (web/Dockerfile).
   output: "standalone",
+  generateBuildId: async () => releaseBuildId,
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false,
