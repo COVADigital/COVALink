@@ -1,7 +1,9 @@
 // Production smoke and security verification. Usage (from web/):
 //   npm run test:deploy            (add -- --keep to leave the stacks up for debugging)
 //
-// Builds the production image through compose.prod.yaml, then uses unique
+// Builds the production image through compose.prod.yaml (or, with
+// SMOKE_IMAGE=<image>@sha256:<digest>, pulls that published image by digest and
+// retags it locally instead of building), then uses unique
 // throwaway Compose projects (covalink-smoke-<id>, -r for the restore target, -f
 // for migration failure), each with its own volumes, networks and random
 // secrets in a temporary env file, and removes them all at the end. It never
@@ -19,6 +21,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { malformedManifests, manifestVariant, parseManifest, recomputeSums, writeManifestText } from "./backup-variants.mjs";
+import { PUBLISHED_IMAGE, revisionFromEnv } from "./published-image.mjs";
 
 const KEEP = process.argv.includes("--keep");
 const WEB = process.cwd();
@@ -34,7 +37,12 @@ const id = randomBytes(3).toString("hex");
 const gitSha = spawnSync("git", ["rev-parse", "--short=12", "HEAD"], { encoding: "utf8" }).stdout.trim() || "unknown";
 const dirty = spawnSync("git", ["status", "--porcelain"], { encoding: "utf8" }).stdout.trim() ? "-dirty" : "";
 const IMAGE = "covalink";
+// Published-image mode: SMOKE_IMAGE=<registry/name>@sha256:<64 hex> tests that image instead of building one.
+const PUBLISHED = process.env.SMOKE_IMAGE ?? "";
+if (PUBLISHED && !PUBLISHED_IMAGE.test(PUBLISHED)) throw new Error("SMOKE_IMAGE must be <image>@sha256:<64 hex>");
 const TAG = `smoke-${gitSha}${dirty}-${id}`;
+// The version the app reports: the tag passed as GIT_SHA when built here, or a published image's own commit.
+let expectedRevision = TAG;
 const work = mkdtempSync(path.join(tmpdir(), "covalink-smoke-"));
 
 // ---------------------------------------------------------------- helpers ----
@@ -308,13 +316,32 @@ const smallPng = await sharp({ create: { width: 1200, height: 900, channels: 3, 
 console.log(`[deploy] project ${main.name} (app on 127.0.0.1:${main.port}), image ${IMAGE}:${TAG}`);
 try {
   console.log("\n# Image");
-  await check("image builds through compose.prod.yaml with no network during next build", () => {
-    const r = main.dc("build", "app");
-    assert(r.status === 0, `compose build failed: ${(r.stderr || r.stdout).split("\n").slice(-5).join(" | ")}`, true);
-    assert(/RUN --network=none npm run build/.test(readFileSync(path.join(WEB, "Dockerfile"), "utf8")), "Dockerfile no longer builds with --network=none", true);
-    imageId = must(docker("image", "inspect", "-f", "{{.Id}}", `${IMAGE}:${TAG}`), "image inspect");
-    return `${imageId.slice(0, 19)}…, ${Math.round(Number(inspect(imageId, "{{.Size}}")) / 1e6)} MB`;
-  });
+  if (PUBLISHED) {
+    // Published-image mode: test an image that was already built and pushed, by digest. It's
+    // pulled, its digest confirmed, and retagged locally so every later check and every
+    // Compose project uses exactly that image. Nothing is built.
+    await check("published image pulled by digest and retagged locally (no build)", () => {
+      must(docker("pull", "-q", PUBLISHED), `pull ${PUBLISHED}`);
+      const digests = inspect(PUBLISHED, "{{json .RepoDigests}}");
+      assert(digests.includes(PUBLISHED.slice(PUBLISHED.indexOf("@") + 1)), `pulled image doesn't carry digest ${PUBLISHED}`, true);
+      must(docker("tag", PUBLISHED, `${IMAGE}:${TAG}`), "retag the published image");
+      imageId = must(docker("image", "inspect", "-f", "{{.Id}}", `${IMAGE}:${TAG}`), "image inspect");
+      // A published image reports the commit it was built from, not the smoke tag.
+      const env = JSON.parse(inspect(imageId, "{{json .Config.Env}}"));
+      let sha = "";
+      try { sha = revisionFromEnv(env); } catch (err) { assert(false, err.message, true); }
+      expectedRevision = sha;
+      return `${PUBLISHED} as ${IMAGE}:${TAG} (${imageId.slice(0, 19)}…, commit ${sha.slice(0, 12)}), ${Math.round(Number(inspect(imageId, "{{.Size}}")) / 1e6)} MB`;
+    });
+  } else {
+    await check("image builds through compose.prod.yaml with no network during next build", () => {
+      const r = main.dc("build", "app");
+      assert(r.status === 0, `compose build failed: ${(r.stderr || r.stdout).split("\n").slice(-5).join(" | ")}`, true);
+      assert(/^RUN --network=none [^\n]*npm run build/m.test(readFileSync(path.join(WEB, "Dockerfile"), "utf8")), "Dockerfile no longer builds with --network=none", true);
+      imageId = must(docker("image", "inspect", "-f", "{{.Id}}", `${IMAGE}:${TAG}`), "image inspect");
+      return `${imageId.slice(0, 19)}…, ${Math.round(Number(inspect(imageId, "{{.Size}}")) / 1e6)} MB`;
+    });
+  }
 
   await check("image runs as uid/gid 1000 by default", () => {
     const user = inspect(imageId, "{{.Config.User}}");
@@ -843,7 +870,7 @@ try {
     const html = res.body.toString();
     assert(res.status === 200, `/admin ${res.status}`);
     const value = (id) => new RegExp(`data-testid="status-${id}"[^>]*>([^<]*)<`).exec(html)?.[1];
-    assert(value("version") === TAG, `version ${value("version")}`);
+    assert(value("version") === expectedRevision, `version ${value("version")}`);
     assert(value("database") === "Ready" && value("storage") === "Ready", `database ${value("database")}, storage ${value("storage")}`);
     assert(value("migrations") === String(MIGRATIONS), `migrations ${value("migrations")}`);
     assert(!secrets.some((s) => html.includes(s)), "status page contains a secret");
@@ -1229,7 +1256,7 @@ try {
     backupDir = path.join(backups, readdirSync(backups)[0]);
     const manifest = JSON.parse(readFileSync(path.join(backupDir, "manifest.json"), "utf8"));
     assert(manifest.consistency === "app-stopped" && manifest.migrationCount === MIGRATIONS && manifest.imageId === imageId, "manifest fields");
-    assert(manifest.gitRevision === TAG, `revision ${manifest.gitRevision}`);
+    assert(manifest.gitRevision === expectedRevision, `revision ${manifest.gitRevision}`);
     const rows = Number(main.psql("select count(*) from media_assets"));
     assert(manifest.mediaRows === rows && manifest.managedFiles === rows, `rows ${manifest.mediaRows}/${rows}, files ${manifest.managedFiles}`);
     assert(readdirSync(backupDir).sort().join() === "SHA256SUMS,database.dump,manifest.json,media.tar", `files: ${readdirSync(backupDir).join(", ")}`);

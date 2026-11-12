@@ -319,6 +319,18 @@ A failing migration then exits 1 and leaves the old app serving. This relies on 
 
 `compose.dev.yaml` is for development only, and its images aren't pinned.
 
+**Temporary Alpine security update.** No official Node 24 Alpine image yet ships zlib 1.4, which fixes CVE-2026-4738. Until one does, COVALink applies Alpine's own security update on top of the pinned base image. The first stage of `web/Dockerfile`, `patched-base`:
+- installs exactly `zlib=1.4-r0` from Alpine's repositories, with apk's normal signature verification;
+- fails the build if that exact package can't be retrieved or verified, if another version ends up installed, or if any other package changes.
+
+Every later stage, both build and runtime, builds on `patched-base`. The version is pinned as `ALPINE_ZLIB_VERSION` in `release/config.env`. The candidate's `alpine-security-update` gate checks four things:
+- the image has exactly that version installed;
+- the SBOM reports it;
+- the vulnerability scan no longer reports zlib;
+- no vulnerability exception covers zlib or the CVE.
+
+**Removing the update** needs its own dedicated review and proof that the replacement base image already contains zlib 1.4-r0 or newer. Repin `NODE_IMAGE`, show its installed zlib version, and then remove the stage, the pin and the gate together.
+
 **When to update:** monthly, and promptly for a Node.js, Alpine, OpenSSL, libvips or PostgreSQL security release. A PostgreSQL **major** upgrade (17 to 18) isn't a tag change: it needs a dump and restore.
 
 **How to update:**

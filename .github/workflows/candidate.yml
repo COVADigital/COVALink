@@ -1,0 +1,339 @@
+# Release candidate: builds the image for a release tag, pushes it to the
+# private staging package only, and runs every candidate gate against that exact
+# digest. It never writes to the production packages. Run manually on the tag
+# v<version>, by the owner only; promotion is a separate workflow (promote.yml).
+# Third-party actions are pinned by full commit SHA. Inputs are validated by
+# release/guard.sh and never placed directly in a script.
+name: Release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example 0.1.0. Run this workflow on the tag v<version>.
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: covalink-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build candidate
+    if: github.actor == 'COVADigital'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.record.outputs.image }}
+    env:
+      VERSION: ${{ inputs.version }}
+      RUN_REF: ${{ github.ref }}
+      RUN_SHA: ${{ github.sha }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Guard
+        run: bash release/guard.sh
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Read the toolchain pins
+        id: toolchain
+        run: |
+          set -a; . release/config.env; set +a
+          echo "buildkit=$BUILDKIT_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx (pinned BuildKit)
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=${{ steps.toolchain.outputs.buildkit }}
+
+      - name: Confirm the pinned toolchain is in effect
+        run: |
+          set -a; . release/config.env; set +a
+          bash release/toolchain-check.sh
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse if this release is already in production
+        run: |
+          set -a; . release/config.env; set +a
+          bash release/production-absent.sh
+
+      - name: Build the source bundle
+        run: bash release/source-bundle/build.sh "$RUNNER_TEMP/release-work"
+
+      - name: Check the component notices against the bundle
+        run: |
+          set -a; . release/config.env; set +a
+          docker run --rm --network none -v "$RUNNER_TEMP/release-work/bundle:/b:ro" -v "$PWD:/repo:ro" --entrypoint node "$NODE_IMAGE" \
+            /repo/release/source-bundle/extract-notices.mjs /b /repo/web/third-party/component-notices.json --check
+
+      - name: Resolve the source bundle (reuse or new)
+        id: bundle
+        run: |
+          set -euo pipefail
+          set -a; . release/config.env; set +a
+          bundle="$RUNNER_TEMP/release-work/bundle"
+          hash=$(sha256sum "$bundle/MANIFEST.json" | cut -c1-64)
+          if out=$(docker buildx imagetools inspect "$SOURCES_PACKAGE:manifest-$hash" --format '{{json .Manifest}}' 2>&1); then
+            digest=$(node -e 'console.log(JSON.parse(process.argv[1]).digest)' "$out")
+            # Confirm the published bundle's manifest is byte-identical before reusing it.
+            docker pull -q "$SOURCES_PACKAGE@$digest" > /dev/null
+            cid=$(docker create "$SOURCES_PACKAGE@$digest" none)
+            docker cp "$cid:/covalink-sources/MANIFEST.json" "$RUNNER_TEMP/published-manifest.json"
+            docker rm "$cid" > /dev/null
+            cmp "$RUNNER_TEMP/published-manifest.json" "$bundle/MANIFEST.json"
+            status=reused
+          else
+            grep -qiE 'not found|manifest unknown|name unknown' <<< "$out" || { echo "couldn't check for a published bundle"; exit 1; }
+            docker buildx build --push --provenance=false --sbom=false \
+              -f release/source-bundle/pack.Dockerfile -t "$STAGING_PACKAGE:sources-$hash" \
+              --metadata-file "$RUNNER_TEMP/bundle-meta.json" "$bundle"
+            digest=$(node -e 'console.log(require(process.argv[1])["containerimage.digest"])' "$RUNNER_TEMP/bundle-meta.json")
+            status=new
+          fi
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bundle digest is malformed"; exit 1; }
+          echo "ref=$SOURCES_PACKAGE@$digest" >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "manifest=$hash" >> "$GITHUB_OUTPUT"
+          echo "source bundle: $SOURCES_PACKAGE@$digest ($status)"
+
+      # One random AES-256 key per candidate run, for Next.js Server Actions. It's
+      # given to the candidate build and the comparison rebuild only as a BuildKit
+      # secret, never printed, never passed as a build argument or job output, and
+      # deleted before this job ends. Next.js embeds it in the built server files,
+      # so it's recoverable from the published image and isn't a secret; it must
+      # not be reused as any repository, workflow, deployment or runtime secret.
+      - name: Generate the Server Actions key for this candidate
+        run: |
+          set -euo pipefail
+          umask 077
+          node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("base64"))' > "$RUNNER_TEMP/server-actions-key"
+
+      - name: Read the pinned SBOM generator
+        id: pins
+        run: |
+          set -a; . release/config.env; set +a
+          echo "sbom=generator=$SBOM_GENERATOR" >> "$GITHUB_OUTPUT"
+          echo "tag=$STAGING_PACKAGE:candidate-$RUN_SHA-$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push the candidate to staging
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: web
+          file: web/Dockerfile
+          platforms: linux/amd64
+          pull: true
+          no-cache: true
+          push: true
+          provenance: mode=min
+          sbom: ${{ steps.pins.outputs.sbom }}
+          tags: ${{ steps.pins.outputs.tag }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            SOURCE_BUNDLE=${{ steps.bundle.outputs.ref }}
+          secret-files: |
+            server_actions_key=${{ runner.temp }}/server-actions-key
+
+      - name: Record the build
+        id: record
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          BUNDLE_REF: ${{ steps.bundle.outputs.ref }}
+          BUNDLE_STATUS: ${{ steps.bundle.outputs.status }}
+          BUNDLE_MANIFEST: ${{ steps.bundle.outputs.manifest }}
+        run: |
+          set -euo pipefail
+          set -a; . release/config.env; set +a
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "candidate digest is malformed"; exit 1; }
+          image="$STAGING_PACKAGE@$DIGEST"
+          [[ "sha256:$(docker buildx imagetools inspect "$image" --raw | sha256sum | cut -c1-64)" == "$DIGEST" ]] || { echo "registry digest differs from the push"; exit 1; }
+          IMAGE="$image" node -e '
+            const e = process.env;
+            const record = { image: e.IMAGE, digest: e.DIGEST, tag_ref: e.RUN_REF, commit: e.RUN_SHA, version: e.VERSION, run_id: e.RUN_ID,
+              source_bundle: e.BUNDLE_REF, source_bundle_status: e.BUNDLE_STATUS, bundle_manifest_sha256: e.BUNDLE_MANIFEST,
+              toolchain: { dockerfile_frontend: e.DOCKERFILE_FRONTEND, buildkit: e.BUILDKIT_IMAGE },
+              scanners: { sbom_generator: e.SBOM_GENERATOR, syft: e.SYFT_IMAGE, grype: e.GRYPE_IMAGE } };
+            require("fs").writeFileSync("build-record.json", JSON.stringify(record, null, 2) + "\n");'
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the build record
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-record
+          path: build-record.json
+          if-no-files-found: error
+
+      # The comparison rebuild runs here, where the key file is, so the key never
+      # leaves this job. The result never contains the key.
+      - name: Rebuild and compare (same commit, same key)
+        env:
+          IMAGE: ${{ steps.record.outputs.image }}
+          BUNDLE_REF: ${{ steps.bundle.outputs.ref }}
+        run: |
+          set -uo pipefail
+          mkdir -p results
+          node release/gates/candidate-gates.mjs rebuild --image "$IMAGE" --work "$RUNNER_TEMP/gates" --out results/rebuild.json \
+            --commit "$RUN_SHA" --bundle "$BUNDLE_REF" --secret-file "$RUNNER_TEMP/server-actions-key" || true
+
+      - name: Delete the Server Actions key
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/server-actions-key" ]; then shred -u "$RUNNER_TEMP/server-actions-key" 2>/dev/null || rm -f "$RUNNER_TEMP/server-actions-key"; fi
+          [ ! -e "$RUNNER_TEMP/server-actions-key" ]
+
+      - name: Upload the rebuild result
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rebuild-result
+          path: results/rebuild.json
+          if-no-files-found: error
+
+  gates:
+    name: Candidate gates
+    needs: build
+    if: github.actor == 'COVADigital'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: read
+    env:
+      VERSION: ${{ inputs.version }}
+      RUN_REF: ${{ github.ref }}
+      RUN_SHA: ${{ github.sha }}
+      IMAGE: ${{ needs.build.outputs.image }}
+      PW_CHANNEL: chrome
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Guard
+        run: |
+          bash release/guard.sh
+          [[ "$IMAGE" =~ ^[a-z0-9./-]+@sha256:[0-9a-f]{64}$ ]] || { echo "candidate reference is malformed"; exit 1; }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Read the toolchain pins
+        id: toolchain
+        run: |
+          set -a; . release/config.env; set +a
+          echo "buildkit=$BUILDKIT_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx (pinned BuildKit)
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=${{ steps.toolchain.outputs.buildkit }}
+
+      - name: Confirm the pinned toolchain is in effect
+        run: |
+          set -a; . release/config.env; set +a
+          bash release/toolchain-check.sh
+
+      - name: Log in to GHCR (read only)
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download the build record
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build-record
+
+      - name: Download the rebuild result
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rebuild-result
+          path: results
+
+      - name: Prepare
+        run: |
+          set -euo pipefail
+          set -a; . release/config.env; set +a
+          docker pull -q "$IMAGE" > /dev/null
+          bundle=$(node -e 'console.log(require("./build-record.json").source_bundle)')
+          status=$(node -e 'console.log(require("./build-record.json").source_bundle_status)')
+          digest=${bundle#*@}
+          src="$SOURCES_PACKAGE@$digest"; [[ "$status" == new ]] && src="$STAGING_PACKAGE@$digest"
+          docker pull -q "$src" > /dev/null
+          cid=$(docker create "$src" none)
+          mkdir -p "$RUNNER_TEMP/bundle"
+          docker cp "$cid:/covalink-sources/." "$RUNNER_TEMP/bundle/"
+          docker rm "$cid" > /dev/null
+          docker run --rm --network none -v "$RUNNER_TEMP/bundle:/b:ro" -v "$PWD:/repo:ro" --entrypoint node "$NODE_IMAGE" /repo/release/source-bundle/verify.mjs /b
+          echo "BUNDLE_REF=$bundle" >> "$GITHUB_ENV"
+          # Regenerate the third-party notices exactly as documented, in the image's
+          # patched base (the pinned base image plus the Alpine security update).
+          base=$(bash release/patched-base.sh)
+          docker run --rm -v covalink-notices:/work -v "$PWD/web:/src:ro" "$base" sh -c '
+            set -e
+            for arch in x64 arm64; do rm -rf /work/$arch && mkdir -p /work/$arch && cp /src/package.json /src/package-lock.json /work/$arch/; done
+            cd /work/x64 && npm ci --ignore-scripts --no-audit --no-fund --loglevel=error
+            cd /work/arm64 && npm ci --ignore-scripts --no-audit --no-fund --loglevel=error --cpu=arm64 --os=linux --libc=musl'
+          mkdir -p "$RUNNER_TEMP/notices"
+          docker run --rm --network none -v covalink-notices:/work -v "$PWD/web:/src:ro" -v "$RUNNER_TEMP/notices:/out" -w /src "$base" \
+            node scripts/third-party-notices.mjs --modules /work/x64/node_modules --modules /work/arm64/node_modules --out /out/THIRD_PARTY_NOTICES.txt
+          cd web && npm ci --no-audit --no-fund --loglevel=error
+
+      - name: Run the candidate gates
+        run: |
+          set -uo pipefail
+          mkdir -p results
+          w="$RUNNER_TEMP/gates"
+          g() { node release/gates/candidate-gates.mjs "$1" --image "$IMAGE" --work "$w" --out "results/$1.json" "${@:2}" || true; }
+          # rebuild ran in the build job (it needs the key); its result is in results/rebuild.json.
+          [ -s results/rebuild.json ] || echo '{"gate":"rebuild","ok":false,"details":{"error":"no rebuild result"}}' > results/rebuild.json
+          g identity --commit "$RUN_SHA"
+          g contents
+          g secrets
+          g sbom
+          g vulnerabilities
+          g alpine-security-update
+          g non-root
+          g notices --generated "$RUNNER_TEMP/notices/THIRD_PARTY_NOTICES.txt"
+          g source-bundle --bundle "$BUNDLE_REF" --bundle-dir "$RUNNER_TEMP/bundle"
+          g libvips-replacement
+          g deployment-smoke
+
+      - name: Assemble the candidate report
+        run: node release/gates/report.mjs results build-record.json candidate-report.json
+
+      - name: Upload the candidate report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-report
+          path: |
+            candidate-report.json
+            results/
+          if-no-files-found: error
