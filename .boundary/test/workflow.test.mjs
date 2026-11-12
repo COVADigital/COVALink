@@ -363,11 +363,33 @@ test('rule data: executable code always comes from the base; only the four data 
 const RELEASE_HEAD = '3bde85c06e4eb0f6db5421fde50c304ff1c3b7ea';
 const RELEASE_BASE = '0baa73ebd0515e8f23c424caa33e1b367daa8aa0';
 
+/**
+ * A rules directory holding the four rule-data files exactly as committed at `sha`, read as Git
+ * objects. Throws if any file can't be extracted, so the checkout's own rules are never used instead.
+ */
+function ruleDataAt(root, sha) {
+  const dir = tempDir('boundary-base-rules-');
+  for (const name of RULE_DATA_FILES) {
+    const r = spawnSync('git', ['cat-file', 'blob', `${sha}:.boundary/${name}`], { cwd: root });
+    if (r.status !== 0 || !r.stdout?.length) throw new Error(`could not extract .boundary/${name} from ${sha}`);
+    writeFileSync(join(dir, name), r.stdout);
+  }
+  return dir;
+}
+
 test('rule data: the release-pipeline tree passes with its approved data and fails without approval', async (t) => {
   const root = join(BOUNDARY, '..');
+  // A base whose rule data can't be extracted fails rather than falling back to the checkout's rules.
+  assert.throws(() => ruleDataAt(root, '0'.repeat(40)), /could not extract \.boundary\/rules\.json/);
   const present = (sha) => spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd: root }).status === 0;
   if (!present(RELEASE_HEAD) || !present(RELEASE_BASE)) { t.skip('the release-pipeline commit is not in this clone'); return; }
-  const ctx = { base: RELEASE_BASE, origin: tempDir('boundary-origin-'), rulesDir: BOUNDARY };
+  // The base rules come from RELEASE_BASE itself, never from the checkout; the workflow code under test is the current one.
+  const rulesDir = ruleDataAt(root, RELEASE_BASE);
+  for (const name of RULE_DATA_FILES) {
+    assert.deepEqual(readFileSync(join(rulesDir, name)), spawnSync('git', ['cat-file', 'blob', `${RELEASE_BASE}:.boundary/${name}`], { cwd: root }).stdout, name);
+  }
+  const { context: baseContext, creator: baseCreator } = JSON.parse(readFileSync(join(rulesDir, 'rules.json'), 'utf8')).approval;
+  const ctx = { base: RELEASE_BASE, origin: tempDir('boundary-origin-'), rulesDir };
   git(ctx.origin, 'init', '--bare', '--quiet');
   git(root, 'push', '--quiet', '--no-verify', ctx.origin, `${RELEASE_HEAD}:refs/pull/2/head`);
   const changed = git(root, 'diff', '--name-only', RELEASE_BASE, RELEASE_HEAD).split('\n').filter(Boolean);
@@ -377,7 +399,7 @@ test('rule data: the release-pipeline tree passes with its approved data and fai
   assert.equal(usedProposed(unapproved), false);
   assert.ok(unapproved.lines.some((l) => l.startsWith(`${LABEL} FAIL (`)), unapproved.lines.slice(-3).join(' | '));
   assert.ok(unapproved.lines.some((l) => l.startsWith(APPROVAL)));
-  const approved = await check(ctx, env, prApi(ctx, 2, RELEASE_HEAD, changed, [status('success', OWNER)]), { trusted: root });
+  const approved = await check(ctx, env, prApi(ctx, 2, RELEASE_HEAD, changed, [status('success', baseCreator, baseContext)]), { trusted: root });
   assert.equal(approved.ok, true, approved.lines.join(' | '));
   assert.equal(usedProposed(approved), true);
   assert.ok(approved.lines.includes(`${LABEL} PASS on pull request #2 at ${RELEASE_HEAD}`));
