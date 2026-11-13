@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { FormAlert, FormField } from "@/components/auth/form-field";
@@ -34,6 +34,7 @@ import type { MediaLibrary } from "@/features/media/types";
 import type { DraftPatchInput } from "@/features/profiles/draft-input";
 import type { PresetId, ThemeConfig, ThemeInput } from "@/features/themes/schema";
 import type { BlockListErrors } from "@/lib/errors";
+import { guardedLink, navigateWithGuard, registerLeaveGuard, type ConfirmLeave } from "@/lib/navigation-guard";
 import { isMediaUrl, parseImageSrc } from "@/lib/validation/media";
 
 export interface EditorProfile {
@@ -153,12 +154,62 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
   // False during SSR/hydration, true once hydrated; browser tests wait for it before typing.
   const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false);
 
+  // Leaving with unsaved changes asks first. Pending holds the navigation to run if the person leaves anyway.
+  const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
+  const leaving = useRef(false);
+  // The dialog has no trigger button, so focus goes back to whatever opened it (a link, the switcher).
+  const returnFocus = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!dirty) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    leaving.current = false;
+    const confirm: ConfirmLeave = (proceed, origin) => {
+      returnFocus.current = origin ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+      setPendingLeave(() => proceed);
+    };
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!leaving.current) e.preventDefault();
+    };
+    const onClick = (e: MouseEvent) => {
+      if (leaving.current) return;
+      const link = guardedLink(e);
+      if (!link) return;
+      e.preventDefault();
+      // Replaying the click keeps each link's own behavior (client-side or full navigation).
+      confirm(() => link.click());
+    };
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    document.addEventListener("click", onClick, true);
+    const unregister = registerLeaveGuard(confirm);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      document.removeEventListener("click", onClick, true);
+      unregister();
+    };
   }, [dirty]);
+
+  // The blocks and appearance the server last stored (the form keeps its own saved values).
+  const [saved, setSaved] = useState({ blocks: profile.draft.blocks, theme: profile.draft.theme, appearance: profile.appearance });
+
+  function loadSaved(nextBlocks: typeof profile.draft.blocks | null, theme: ThemeConfig, info: AppearanceInfo) {
+    if (nextBlocks) blocks.load(nextBlocks);
+    appearance.load(theme, info);
+    setSaved((s) => ({ blocks: nextBlocks ?? s.blocks, theme, appearance: info }));
+  }
+
+  /**
+   * Drops the unsaved edits before navigating: Next.js keeps a page it leaves
+   * mounted but hidden, so the edits would otherwise come back with it.
+   */
+  function leaveWithoutSaving() {
+    const proceed = pendingLeave;
+    setPendingLeave(null);
+    leaving.current = true;
+    reset();
+    loadSaved(saved.blocks, saved.theme, saved.appearance);
+    setStatus(null);
+    proceed?.();
+  }
 
   /**
    * Clears the message synchronously, then runs the async work in a transition.
@@ -217,8 +268,7 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
       const result = await saveDraftAction(profile.id, { expectedRevision: state.revision, patch });
       if (!result.ok) return fail(result, sent);
       reset(values);
-      blocks.load(result.data.blocks);
-      appearance.load(result.data.theme, result.data.appearance);
+      loadSaved(result.data.blocks, result.data.theme, result.data.appearance);
       media.refresh();
       setState((st) => ({ ...st, revision: result.data.revision, hasUnpublishedChanges: true }));
       setStatus({
@@ -236,8 +286,7 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
       const result = await publishAction(profile.id, { expectedRevision: state.revision, ...(patch ? { patch } : {}) });
       if (!result.ok) return fail(result, sent);
       if (values) reset(values);
-      blocks.load(result.data.blocks);
-      appearance.load(result.data.theme, result.data.appearance);
+      loadSaved(result.data.blocks, result.data.theme, result.data.appearance);
       media.refresh();
       setState({ revision: result.data.revision, isPublished: true, everPublished: true, hasUnpublishedChanges: false });
       setStatus({ kind: "success", text: "Published. Your public page is up to date." });
@@ -259,8 +308,7 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
       const result = await revertDraftAction(profile.id, { expectedRevision: state.revision });
       if (!result.ok) return fail(result);
       reset(toValues(result.data.draft));
-      blocks.load(result.data.draft.blocks);
-      appearance.load(result.data.draft.theme, result.data.appearance);
+      loadSaved(result.data.draft.blocks, result.data.draft.theme, result.data.appearance);
       setProtectedBlocks(result.data.protectedBlocks);
       media.refresh();
       setState((st) => ({ ...st, revision: result.data.revision, hasUnpublishedChanges: false }));
@@ -276,7 +324,7 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
       const values = getValues();
       const result = await saveDraftAction(profile.id, { expectedRevision: state.revision, patch: toPatch(values, { replaceTheme: presetId }) });
       if (!result.ok) return fail(result);
-      appearance.load(result.data.theme, result.data.appearance);
+      loadSaved(null, result.data.theme, result.data.appearance);
       media.refresh();
       setState((st) => ({ ...st, revision: result.data.revision, hasUnpublishedChanges: true }));
       setStatus({ kind: "success", text: "Appearance replaced and draft saved." });
@@ -421,13 +469,40 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
 
         <FormAlert message={status?.kind === "error" ? status.text : null} />
         {status?.conflict && (
-          <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => window.location.reload()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-fit"
+            onClick={() => navigateWithGuard(() => window.location.reload())}
+          >
             Reload latest version
           </Button>
         )}
+        {/* A success message describes the last action; once there are new edits, "Unsaved changes" is the state. */}
         <p role="status" aria-live="polite" className="text-sm text-muted-foreground" data-testid="editor-status">
-          {status?.kind === "success" ? status.text : ""}
+          {status?.kind === "success" && !dirty ? status.text : ""}
         </p>
+
+        <AlertDialog open={pendingLeave !== null} onOpenChange={(open) => !open && setPendingLeave(null)}>
+          <AlertDialogContent
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              returnFocus.current?.focus();
+            }}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
+              <AlertDialogDescription>
+                You have unsaved changes in this profile. If you leave now, they&apos;re lost.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep editing</AlertDialogCancel>
+              <AlertDialogAction onClick={leaveWithoutSaving}>Leave without saving</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <div className="flex flex-wrap gap-2">
           <Button type="submit" form="header-form" variant="outline" disabled={busy || locked || !dirty}>

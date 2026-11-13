@@ -173,10 +173,13 @@ test("server-side contrast enforcement over an image matches the editor's warnin
   await appearanceTab(page);
   await field(page, "Overlay darkness").fill("20");
   await expect(page.getByTestId("contrast-summary")).toBeVisible();
+  const warned = (await page.locator("#theme-text-color-contrast").textContent())!;
   // The editor would block nothing client-side for contrast; the server refuses the publish with the same fields.
   await page.getByRole("button", { name: /^Publish/ }).click();
   await expect(page.getByRole("alert").filter({ hasText: "enough contrast" })).toBeVisible();
-  await expect(page.locator("#theme-text-color-contrast")).toBeVisible();
+  // The server's message is the editor's warning, shown once on the field.
+  await expect(page.locator("#theme-text-color-error")).toHaveText(warned);
+  await expect(page.locator("#theme-text-color-contrast")).toHaveCount(0);
   await field(page, "Overlay darkness").fill("70");
   await expect(page.getByTestId("contrast-summary")).toHaveCount(0);
   // Back to the saved, published 70%: nothing left to save, and the page stays as published.
