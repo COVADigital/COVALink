@@ -72,7 +72,7 @@ async function Analytics({ params, searchParams }: Pick<PageProps<"/dashboard/pr
   const qrUrl = qrTargetUrl(env().APP_URL, profile.handle);
   return (
     <>
-      <AppHeader user={user} />
+      <AppHeader user={user} profileId={profile.id} />
       <main className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-8 sm:px-6">
         <div className="grid gap-1">
           <Link href={`/dashboard/profiles/${profile.id}`} className="w-fit text-sm text-muted-foreground underline-offset-4 hover:underline">

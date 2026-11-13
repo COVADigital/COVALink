@@ -133,6 +133,31 @@ describe("ownership (IDOR)", () => {
     expect(all.map((p) => p.id)).toEqual([mine.id]);
     expect((await resolveActiveProfile(alice, "garbage")).active?.id).toBe(mine.id);
   });
+
+  it("shows the owned profile a page is about and asks to remember it", async () => {
+    const first = await createFor(alice, "alice");
+    const second = await createFor(alice, "alice-two");
+    const viewed = await resolveActiveProfile(alice, first.id, second.id);
+    expect(viewed.active?.id).toBe(second.id);
+    expect(viewed.sync).toBe(true);
+    // Already the remembered one, or no page profile: nothing to sync.
+    expect(await resolveActiveProfile(alice, second.id, second.id)).toMatchObject({ active: { id: second.id }, sync: false });
+    expect(await resolveActiveProfile(alice, first.id)).toMatchObject({ active: { id: first.id }, sync: false });
+    // No cookie yet: the viewed profile still wins and is remembered.
+    expect(await resolveActiveProfile(alice, undefined, second.id)).toMatchObject({ active: { id: second.id }, sync: true });
+  });
+
+  it("never shows or remembers someone else's profile passed as the page's profile", async () => {
+    const mine = await createFor(alice, "alice");
+    const mineToo = await createFor(alice, "alice-two");
+    const theirs = await createFor(bob, "bob");
+    for (const viewedId of [theirs.id, "garbage", "00000000-0000-0000-0000-000000000000"]) {
+      const r = await resolveActiveProfile(alice, mineToo.id, viewedId);
+      expect(r.active?.id).toBe(mineToo.id);
+      expect(r.sync).toBe(false);
+      expect(r.all.map((p) => p.id).sort()).toEqual([mine.id, mineToo.id].sort());
+    }
+  });
 });
 
 describe("narrow draft contract (header/SEO, plus validated blocks)", () => {

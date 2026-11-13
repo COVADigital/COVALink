@@ -139,28 +139,25 @@ test("“All profiles” asks first, and the dialog works from the keyboard", as
 });
 
 test("switching profiles asks first; cancelling keeps the current profile and its edits", async ({ page }) => {
-  // Edit the profile the switcher shows as active, then switch to the other one.
+  // The switcher shows the profile being edited.
   const switcher = page.getByRole("combobox", { name: "Active profile" });
-  await openEditor(page, mainUrl);
-  const mainActive = (await switcher.textContent())?.includes("Main");
-  const [fromUrl, fromLabel, toUrl, toLabel] = mainActive ? [mainUrl, "Main", sideUrl, "Side"] : [sideUrl, "Side", mainUrl, "Main"];
-  await editBio(page, fromUrl, "Unsaved switcher edit");
-  await expect(switcher).toContainText(fromLabel);
+  await editBio(page, mainUrl, "Unsaved switcher edit");
+  await expect(switcher).toContainText("Main");
 
   await switcher.click();
-  await page.getByRole("option", { name: new RegExp(toLabel) }).click();
+  await page.getByRole("option", { name: /Side/ }).click();
   await expect(leaveDialog(page)).toBeVisible();
   await page.getByRole("button", { name: "Keep editing" }).click();
-  await expect(page).toHaveURL(fromUrl);
-  await expect(switcher).toContainText(fromLabel);
+  await expect(page).toHaveURL(mainUrl);
+  await expect(switcher).toContainText("Main");
   await expect(switcher).toBeFocused();
   await expect(page.locator("#bio")).toHaveValue("Unsaved switcher edit");
 
   await switcher.click();
-  await page.getByRole("option", { name: new RegExp(toLabel) }).click();
+  await page.getByRole("option", { name: /Side/ }).click();
   await page.getByRole("button", { name: "Leave without saving" }).click();
-  await expect(page).toHaveURL(toUrl);
-  await expect(page.getByTestId("editor-handle").filter({ visible: true })).toHaveText(`/drafts-${toLabel.toLowerCase()}`);
+  await expect(page).toHaveURL(sideUrl);
+  await expect(page.getByTestId("editor-handle").filter({ visible: true })).toHaveText("/drafts-side");
 });
 
 test("an edit after saving clears the saved message; after saving again, links don't ask", async ({ page }) => {
