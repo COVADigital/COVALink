@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import Link from "next/link";
+import { ActiveProfileSync } from "@/components/active-profile-sync";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { ProfileSwitcher } from "@/components/profile-switcher";
 import { getActiveProfile } from "@/features/profiles/active";
@@ -7,9 +9,12 @@ import { can } from "@/lib/auth/permissions";
 
 const navLink = "rounded-md px-1 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";
 
-/** Dashboard header. A full sidebar application shell isn't implemented. */
-export async function AppHeader({ user }: { user: CurrentUser }) {
-  const { active, all } = await getActiveProfile(user.id);
+/**
+ * Dashboard header. A full sidebar application shell isn't implemented.
+ * `profileId`: the owned profile the page is about (checked by the page); it is shown as active and remembered.
+ */
+export async function AppHeader({ user, profileId }: { user: CurrentUser; profileId?: string }) {
+  const { active, all, sync } = await getActiveProfile(user.id, profileId);
   return (
     <header className="border-b bg-background">
       <div className="mx-auto flex min-h-14 w-full max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2 sm:px-6">
@@ -20,7 +25,7 @@ export async function AppHeader({ user }: { user: CurrentUser }) {
           <Link href="/dashboard/profiles" className={navLink}>
             Profiles
           </Link>
-          <Link href="/dashboard/analytics" className={navLink}>
+          <Link href={active ? `/dashboard/profiles/${active.id}/analytics` : "/dashboard/analytics"} className={navLink}>
             Analytics
           </Link>
           <Link href="/dashboard/account" className={navLink}>
@@ -38,6 +43,7 @@ export async function AppHeader({ user }: { user: CurrentUser }) {
           )}
           <SignOutButton />
         </div>
+        {sync && active && <ActiveProfileSync profileId={active.id} render={randomUUID()} />}
       </div>
     </header>
   );
