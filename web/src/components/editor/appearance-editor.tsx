@@ -196,7 +196,9 @@ function describedBy(...ids: (string | false | undefined)[]) {
   return ids.filter(Boolean).join(" ") || undefined;
 }
 
-function Messages({ id, error, warning, hint }: { id: string; error?: string; warning?: string; hint?: string }) {
+function Messages({ id, error, warning: contrast, hint }: { id: string; error?: string; warning?: string; hint?: string }) {
+  // A refused publish reports the same contrast problem as an error; show it once.
+  const warning = contrast !== error ? contrast : undefined;
   return (
     <>
       {error && (
@@ -275,7 +277,7 @@ function ColorField({
           maxLength={7}
           className="h-10 font-mono"
           aria-invalid={shown ? true : undefined}
-          aria-describedby={describedBy(shown && `${id}-error`, warning && `${id}-contrast`)}
+          aria-describedby={describedBy(shown && `${id}-error`, warning && warning !== shown && `${id}-contrast`)}
           onChange={(e) => edit(e.target.value.trim())}
         />
       </div>

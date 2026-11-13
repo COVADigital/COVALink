@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { selectProfileAction } from "@/features/profiles/actions";
+import { navigateWithGuard } from "@/lib/navigation-guard";
 
 export interface SwitcherProfile {
   id: string;
@@ -17,7 +18,7 @@ export function ProfileSwitcher({ profiles, activeId }: { profiles: SwitcherProf
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  function onChange(id: string) {
+  function switchTo(id: string) {
     setError(null);
     startTransition(async () => {
       const result = await selectProfileAction(id);
@@ -30,10 +31,14 @@ export function ProfileSwitcher({ profiles, activeId }: { profiles: SwitcherProf
     });
   }
 
+  // Asked first when the page has unsaved changes; cancelling keeps the current selection and focus.
+  const trigger = useRef<HTMLButtonElement>(null);
+  const onChange = (id: string) => navigateWithGuard(() => switchTo(id), trigger.current);
+
   return (
     <div className="flex items-center gap-2">
       <Select value={activeId ?? undefined} onValueChange={onChange} disabled={pending}>
-        <SelectTrigger size="sm" aria-label="Active profile" className="max-w-44" data-testid="profile-switcher">
+        <SelectTrigger ref={trigger} size="sm" aria-label="Active profile" className="max-w-44" data-testid="profile-switcher">
           <SelectValue placeholder="Choose profile" />
         </SelectTrigger>
         <SelectContent>

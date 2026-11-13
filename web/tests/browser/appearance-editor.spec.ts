@@ -269,6 +269,9 @@ test("warns about low contrast, saves the draft, but the server refuses to publi
   await expect(page.getByRole("tab", { name: /Appearance/ })).toHaveAttribute("aria-selected", "true");
   await expect(field(page, "Text")).toBeFocused();
   await expect(page.locator("#theme-text-color-error")).toContainText("needs at least 4.5:1");
+  // The same problem is shown once: the server's error replaces the identical live warning.
+  await expect(page.getByText("Text contrast is 1.00:1 against the background; it needs at least 4.5:1.")).toHaveCount(1);
+  await expect(field(page, "Text")).toHaveAttribute("aria-describedby", "theme-text-color-error");
 
   await setColor(page, "Text", "#18181b");
   await expect(warning).toHaveCount(0);
@@ -367,6 +370,7 @@ test("draft appearance stays private, discard restores the published one, and a 
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "changed somewhere else" })).toBeVisible();
   await page.getByRole("button", { name: "Reload latest version" }).click();
+  await page.getByRole("button", { name: "Leave without saving" }).click();
   await page.locator("[data-hydrated]").waitFor();
   await appearanceTab(page);
   await expect(field(page, "Accent")).toHaveValue("#7c2d12");

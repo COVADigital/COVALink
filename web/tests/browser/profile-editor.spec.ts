@@ -164,6 +164,7 @@ test("a stale tab can't overwrite newer changes and is offered a reload", async 
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.locator("form [role=alert], [role=alert]").filter({ hasText: "changed somewhere else" })).toBeVisible();
   await page.getByRole("button", { name: "Reload latest version" }).click();
+  await page.getByRole("button", { name: "Leave without saving" }).click();
   await expect(page.locator("#bio")).toHaveValue("Saved in the other tab");
   await other.close();
 });

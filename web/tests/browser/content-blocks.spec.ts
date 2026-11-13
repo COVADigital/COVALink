@@ -273,6 +273,7 @@ test("a stale tab can't overwrite a newer block order and is offered a reload", 
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "changed somewhere else" })).toBeVisible();
   await page.getByRole("button", { name: "Reload latest version" }).click();
+  await page.getByRole("button", { name: "Leave without saving" }).click();
   await page.locator("[data-hydrated]").waitFor();
   await expect.poll(() => labels(page)).toEqual(saved);
   await other.close();
