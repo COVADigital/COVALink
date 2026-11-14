@@ -177,13 +177,15 @@ test("reorders by pointer drag (progressive enhancement)", async ({ page }) => {
 
 test("reorders by keyboard drag on the handle (Space, arrow, Space)", async ({ page }) => {
   await openEditor(page);
-  // dnd-kit announces each step in its own live region; waiting for it also
-  // gives dnd-kit time to measure the drop targets after pick-up.
+  // dnd-kit announces each step in its own live region.
   const dndStatus = page.locator('[id^="DndLiveRegion"]');
   await card(page, "Hello **world**").getByTestId("block-drag-handle").focus();
   await page.keyboard.press("Space");
   // "Picked up …" is immediately followed by the start position's "over" announcement.
   await expect(dndStatus).toHaveText("“Hello **world**” is over position 4 of 4.");
+  // The announcement comes at pick-up, but dnd-kit measures the drop targets in an effect after it;
+  // an arrow key before that has nothing to move to. Two frames let the measurement commit.
+  await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
   await page.keyboard.press("ArrowUp");
   await expect(dndStatus).toHaveText("“Hello **world**” is over position 3 of 4.");
   await page.keyboard.press("Space");
@@ -198,7 +200,7 @@ test("hides, duplicates and deletes blocks with sensible focus", async ({ page }
 
   const shop = card(page, "Shop");
   await expand(shop);
-  await shop.getByLabel("Show on page").click();
+  await shop.getByRole("switch", { name: "Show “Shop” on page" }).click();
   await expect(shop.getByTestId("block-hidden-badge")).toBeVisible();
   await expect(preview.getByRole("link", { name: "Shop" })).toHaveCount(0);
   expect(await previewTypes(page)).toEqual(["heading", "text", "divider"]);
@@ -228,7 +230,7 @@ test("publishing shows the editor's blocks publicly; drafts stay private; discar
   await openEditor(page);
   const shop = card(page, "Shop");
   await expand(shop);
-  await shop.getByLabel("Show on page").click();
+  await shop.getByRole("switch", { name: "Show “Shop” on page" }).click();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await expect(status(page)).toContainText("Published");
   const editorOrder = await previewTypes(page);
@@ -253,7 +255,8 @@ test("publishing shows the editor's blocks publicly; drafts stay private; discar
   await expect(visitor.getByRole("heading", { level: 2, name: "My links" })).toBeVisible();
   expect(await visitor.content()).not.toContain("Secret heading");
 
-  await page.getByRole("button", { name: "Discard draft changes" }).click();
+  await page.getByRole("button", { name: "More profile actions" }).click();
+  await page.getByRole("menuitem", { name: "Discard draft changes" }).click();
   await page.getByRole("button", { name: "Discard changes" }).click();
   await expect(status(page)).toContainText("Draft changes discarded");
   expect(await labels(page)).toEqual(["Shop", "My links", "Hello **world**", "Divider"]);
@@ -342,8 +345,10 @@ test("keeps stored blocks it can't edit, and locks drafts it can't rewrite lossl
   const notice = page.getByTestId("protected-blocks").filter({ visible: true });
   await expect(notice).toContainText("a block that this version of COVALink can't edit without losing data");
   await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#bio").fill("Trying to save anyway");
   await expect(page.getByRole("button", { name: "Save draft" })).toBeDisabled();
+  await page.getByRole("tab", { name: "Content" }).click();
   await expect(page.getByRole("group", { name: "Add block" }).getByRole("button", { name: "Link", exact: true })).toBeDisabled();
 
   // 101 individually valid blocks: the editor shows 100, so a full-list save would drop one. It's locked instead.
@@ -358,6 +363,7 @@ test("keeps stored blocks it can't edit, and locks drafts it can't rewrite lossl
   await openEditor(page, legacyUrl);
   await expect(notice).toContainText("a block that this version");
   await expect(cards(page)).toHaveCount(100);
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#bio").fill("Trying to save anyway");
   await expect(page.getByRole("button", { name: "Save draft" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
@@ -372,9 +378,13 @@ test.describe("phone viewport", () => {
     await expand(card(page, "Shop"));
     await expand(card(page, "My links"));
     expect(await noOverflow()).toBe(true);
-    const moveDown = page.getByRole("button", { name: "Move “Shop” down" });
-    await moveDown.scrollIntoViewIfNeeded();
-    await expect(moveDown).toBeInViewport({ ratio: 1 });
+    // On phones the move controls are in the row's actions menu; its trigger must fit the screen.
+    const actions = page.getByRole("button", { name: "More actions for “Shop”" });
+    await actions.scrollIntoViewIfNeeded();
+    await expect(actions).toBeInViewport({ ratio: 1 });
+    await actions.click();
+    await expect(page.getByRole("menuitem", { name: "Move down" })).toBeVisible();
+    await page.keyboard.press("Escape");
     await page.goto(`/${HANDLE}`);
     await expect(page.getByRole("link", { name: "Shop" })).toBeVisible();
     expect(await noOverflow()).toBe(true);

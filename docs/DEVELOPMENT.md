@@ -193,3 +193,23 @@ The two builds must then be byte-identical, file by file, with six exceptions, e
 **Vulnerability policy:** a critical finding blocks, as does a high finding with a fix. A high finding without a fix blocks unless `web/third-party/vulnerability-exceptions.json` holds an exception for that digest naming the finding, package and reason, naming `COVADigital` as approver, and expiring within 30 days. Medium and low findings are reported. A scanner failure blocks.
 
 **Source-bundle tooling** (`release/source-bundle/`): `build.sh` builds a bundle in stages (a rerun skips finished ones), `verify.mjs` checks one offline, `extract-notices.mjs` derives the component notices, `retrieve.mjs` downloads one by digest with no credentials, and `pack.Dockerfile` packs one as an image. The gates and bundle scripts can be run locally against a local registry on `127.0.0.1`; `retrieve.mjs --insecure-http` is for such registries only.
+
+## Editor foundation remediation (2026-11-14)
+
+- Address and profile-name edits participate in the editor navigation confirmation and reset on confirmed departure. Cancelling preserves both values.
+- All draft form fields are disabled during a pending editor operation. Workspace sign-out uses the same leave guard and restores focus when cancelled.
+- Selected block rows expose current-item semantics, a selection announcement, and an accessible relationship to their preview block, including collapsed rows.
+- Failed client validation disables Save and Publish until draft content changes. Invalid-outcome clearing runs after commit and no longer updates state during rendering or schedules a second render for every keystroke.
+- Unpublish, Discard and Replace failures identify their operation and provide recovery instructions. Network failures do not assume the server made no change. Successful Unpublish confirmation remains visible with unrelated draft edits.
+
+Verification: public-boundary validation and diff whitespace check passed; final typecheck, lint and production build passed; affected editor/block unit tests 327/327; affected profile integration tests 27/27. The final rebuilt browser run passed 35/35 across editor-shell, contact-social-blocks and content-blocks, including integrated editor/preview axe, 320px axe and 44px editor target checks, responsive layouts, reduced motion, metadata discard/return, sign-out focus restoration, delayed Save/Publish, operation-specific recovery and Unpublish confirmation with unsaved draft edits.
+
+The complete unit run encountered a timeout in an unchanged Git executable-bit subprocess test (736 passed, 1 timed out); a one-worker rerun also passed 736 with one timeout in the same Git check. The complete browser pass reported 106 passed, 3 failed, 20 configured real-provider skips and 3 dependent tests not run. Its three failures (preview-only IDs breaking markup parity, an overbroad fieldset lock, and an ambiguous new alert locator) were corrected and all affected specifications passed in the final 35-test run. The complete suite was not repeated after those corrections. The active-profile and unsaved-change specifications passed during the complete pass. Browser checks use installed desktop Edge, simulated touch/viewport and reduced-motion settings. They do not establish physical-device, real soft-keyboard, real screen-reader, or actual browser-zoom verification. Target-size measurements apply to editor chrome; integrated axe includes the preview in the focused specification.
+
+Final affected test commands (from `web/`):
+
+```sh
+npm run test:unit -- tests/unit/editor-status.test.ts tests/unit/blocks.test.ts tests/unit/contact-social-blocks.test.ts tests/unit/embed-blocks.test.ts tests/unit/future-block-types.test.ts tests/unit/image-blocks.test.ts
+npm run test:integration -- tests/integration/profile-actions.test.ts tests/integration/profiles.test.ts
+npm run test:browser -- tests/browser/editor-shell.spec.ts tests/browser/contact-social-blocks.spec.ts tests/browser/content-blocks.spec.ts
+```

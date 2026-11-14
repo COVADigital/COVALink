@@ -1,11 +1,16 @@
+import { randomUUID } from "node:crypto";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { AppHeader } from "@/components/app-header";
+import { ActiveProfileSync } from "@/components/active-profile-sync";
+import { workspaceLinks } from "@/components/editor/workspace-links";
+import { WorkspaceRail } from "@/components/editor/workspace-nav";
+import { ProfileSwitcher } from "@/components/profile-switcher";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listMedia } from "@/features/media/service";
+import { getActiveProfile } from "@/features/profiles/active";
 import { getOwnedProfile } from "@/features/profiles/service";
+import { can } from "@/lib/auth/permissions";
 import { requireUser } from "@/lib/auth/session";
 import { AppError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
@@ -38,43 +43,49 @@ async function Editor({ params }: Pick<PageProps<"/dashboard/profiles/[id]">, "p
     logger.error({ err, userId: user.id }, "Loading the media library failed");
     return null;
   });
+  // As in the dashboard header: the profile being edited is shown as active and remembered.
+  const { active, all, sync } = await getActiveProfile(user.id, profile.id);
+  const links = workspaceLinks(can(user.role, "admin.access"), active?.id ?? null);
+  // The focused editor shell is local to this route; other pages keep AppHeader.
   return (
-    <>
-      <AppHeader user={user} profileId={profile.id} />
-      <main className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-8 sm:px-6">
-        <div className="grid gap-1">
-          <Link href="/dashboard/profiles" className="w-fit text-sm text-muted-foreground underline-offset-4 hover:underline">
-            ← All profiles
-          </Link>
-          <h1 className="text-2xl font-semibold tracking-tight">{profile.label}</h1>
-          <p className="flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
-            <span data-testid="editor-handle">/{profile.handle}</span>
-            <Link href={`/dashboard/profiles/${profile.id}/analytics`} className="underline-offset-4 hover:underline">
-              Analytics and QR code
-            </Link>
-          </p>
-        </div>
-        {/* Keyed by id only: actions that evict cache tags also refresh this route, and
-            the editor's local state (revision, status) must survive that refresh. */}
-        <ProfileEditor
-          key={profile.id}
-          profile={{
-            id: profile.id,
-            handle: profile.handle,
-            verified: profile.verified,
-            isPublished: profile.isPublished,
-            everPublished: profile.publishedRevision !== null,
-            hasUnpublishedChanges: profile.hasUnpublishedChanges,
-            revision: profile.draftRevision,
-            draft: profile.draft,
-            protectedBlocks: profile.protectedBlocks,
-            appearance: profile.appearance,
-            media,
-          }}
-        />
-        <ProfileSettingsForm profileId={profile.id} handle={profile.handle} label={profile.label} />
-        <DangerZone profileId={profile.id} handle={profile.handle} />
-      </main>
-    </>
+    <div className="editor-scope flex min-h-dvh flex-1">
+      <WorkspaceRail links={links} current="profiles" />
+      {/* Keyed by id only: actions that evict cache tags also refresh this route, and
+          the editor's local state (revision, status) must survive that refresh. */}
+      <ProfileEditor
+        key={profile.id}
+        links={links}
+        label={profile.label}
+        profile={{
+          id: profile.id,
+          handle: profile.handle,
+          verified: profile.verified,
+          isPublished: profile.isPublished,
+          everPublished: profile.publishedRevision !== null,
+          hasUnpublishedChanges: profile.hasUnpublishedChanges,
+          revision: profile.draftRevision,
+          draft: profile.draft,
+          protectedBlocks: profile.protectedBlocks,
+          appearance: profile.appearance,
+          media,
+        }}
+        switcher={
+          all.length > 1 ? (
+            <ProfileSwitcher
+              profiles={all.map(({ id, label, handle }) => ({ id, label, handle }))}
+              activeId={active?.id ?? null}
+              triggerClassName="h-10 data-[size=sm]:h-10 max-ed-lg:h-11 max-ed-lg:data-[size=sm]:h-11"
+            />
+          ) : null
+        }
+        manage={
+          <>
+            <ProfileSettingsForm profileId={profile.id} handle={profile.handle} label={profile.label} />
+            <DangerZone profileId={profile.id} handle={profile.handle} />
+          </>
+        }
+      />
+      {sync && active && <ActiveProfileSync profileId={active.id} render={randomUUID()} />}
+    </div>
   );
 }

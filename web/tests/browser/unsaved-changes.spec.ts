@@ -56,6 +56,7 @@ async function openEditor(page: Page, url: string) {
 /** Opens the editor and makes an unsaved edit to the bio. */
 async function editBio(page: Page, url: string, bio: string) {
   await openEditor(page, url);
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#bio").fill(bio);
   await expect(page.getByTestId("unsaved-indicator").filter({ visible: true })).toBeVisible();
 }
@@ -88,6 +89,7 @@ test("without unsaved changes, links navigate without asking", async ({ page }) 
 test("a header link asks first: Keep editing keeps every edit, Leave without saving navigates", async ({ page }) => {
   await editBio(page, mainUrl, "Unsaved header-link edit");
   await page.locator("#displayName").fill("Renamed but unsaved");
+  await page.getByRole("tab", { name: "Content" }).click();
   await page.getByRole("group", { name: "Add block" }).getByRole("button", { name: "Heading" }).click();
   await page.getByLabel("Heading text").fill("Unsaved heading");
 
@@ -112,6 +114,7 @@ test("a header link asks first: Keep editing keeps every edit, Leave without sav
   await page.getByTestId("profile-row").filter({ visible: true }).filter({ hasText: "/drafts-main" }).getByRole("link", { name: "Edit" }).click();
   await expect(page).toHaveURL(mainUrl);
   await expect(page.locator("#bio")).toHaveValue("");
+  await page.getByRole("tab", { name: "Profile" }).filter({ visible: true }).click();
   await expect(page.locator("#displayName").filter({ visible: true })).toHaveValue("Main Dana");
   await expect(page.getByLabel("Heading text")).toHaveCount(0);
   await expect(page.getByTestId("unsaved-indicator").filter({ visible: true })).toHaveCount(0);
@@ -119,7 +122,7 @@ test("a header link asks first: Keep editing keeps every edit, Leave without sav
 
 test("“All profiles” asks first, and the dialog works from the keyboard", async ({ page }) => {
   await editBio(page, mainUrl, "Unsaved all-profiles edit");
-  const back = page.getByRole("link", { name: "← All profiles" });
+  const back = page.getByRole("link", { name: "Back to profiles" });
 
   await back.focus();
   await page.keyboard.press("Enter");
@@ -243,11 +246,13 @@ test("a conflict reload asks first: cancelling keeps the local text, leaving loa
   await openEditor(page, mainUrl);
   const other = await context.newPage();
   await openEditor(other, mainUrl);
+  await other.getByRole("tab", { name: "Profile" }).click();
   await other.locator("#bio").fill("Saved in the other tab");
   await other.getByRole("button", { name: "Save draft" }).click();
   await expect(other.getByTestId("editor-status").filter({ visible: true })).toHaveText("Draft saved.");
   await other.close();
 
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#bio").fill("Typed in the stale tab");
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "changed somewhere else" })).toBeVisible();

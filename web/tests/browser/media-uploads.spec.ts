@@ -74,8 +74,8 @@ async function uploadInto(page: Page, kind: "avatar" | "background", file: { nam
 }
 
 async function appearanceTab(page: Page) {
-  await page.getByRole("tab", { name: /Appearance/ }).click();
-  await expect(page.getByRole("tab", { name: /Appearance/ })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: /Design/ }).click();
+  await expect(page.getByRole("tab", { name: /Design/ })).toHaveAttribute("aria-selected", "true");
 }
 
 async function publish(page: Page) {
@@ -96,6 +96,7 @@ const loaded = (el: Locator) => el.evaluate((i: HTMLImageElement) => i.complete 
 
 test("uploads an avatar through the file picker, selects it, publishes it and shows it on the public page", async ({ page }) => {
   editorUrl = await createProfile(page, "mediapage");
+  await page.getByRole("tab", { name: "Profile" }).click();
   await expect(picker(page, "avatar").getByTestId("media-empty")).toBeVisible();
   await expect(picker(page, "avatar").getByTestId("media-quota")).toHaveText("0 B of 50.0 MB used");
 
@@ -122,6 +123,7 @@ test("uploads an avatar through the file picker, selects it, publishes it and sh
 
 test("shows upload errors from the server: an SVG disguised as a PNG is refused", async ({ page }) => {
   await openEditor(page);
+  await page.getByRole("tab", { name: "Profile" }).click();
   await uploadInto(page, "avatar", { name: "logo.png", mimeType: "image/png", buffer: img.svg() });
   await expect(picker(page, "avatar").getByTestId("media-error")).toHaveText("SVG images aren't supported. Use a JPEG, PNG or WebP image.");
   await expect(items(page, "avatar")).toHaveCount(1);
@@ -189,6 +191,7 @@ test("server-side contrast enforcement over an image matches the editor's warnin
 
 test("deletion: in-use images explain why they can't be deleted; unused ones are deleted after confirmation", async ({ page }) => {
   await openEditor(page);
+  await page.getByRole("tab", { name: "Profile" }).click();
   const first = items(page, "avatar").first();
   const firstUrl = (await first.getAttribute("data-url"))!;
 
@@ -225,6 +228,7 @@ test.describe("phone viewport", () => {
 
   test("upload, select, publish, view, and the delete refusal all work at 390 px without horizontal scrolling", async ({ page }) => {
     const url = await createProfile(page, "mediaphone");
+    await page.getByRole("tab", { name: "Profile" }).click();
     await uploadInto(page, "avatar", { name: "phone.jpg", mimeType: "image/jpeg", buffer: await img.jpeg(600, 800, "#336699") });
     await expect(items(page, "avatar")).toHaveCount(2); // the first avatar from the earlier tests, plus this one
     const chosen = items(page, "avatar").first();
@@ -238,6 +242,7 @@ test.describe("phone viewport", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 
     await openEditor(page, url);
+    await page.getByRole("tab", { name: "Profile" }).click();
     await items(page, "avatar").first().getByTestId("media-delete").tap();
     await expect(page.getByRole("alertdialog").getByTestId("media-in-use")).toContainText("/mediaphone");
     await page.getByRole("alertdialog").getByRole("button", { name: "Close" }).tap();

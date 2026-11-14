@@ -39,10 +39,10 @@ export function DangerZone({ profileId, handle }: { profileId: string; handle: s
   };
 
   return (
-    <section aria-labelledby="danger-heading" className="rounded-xl border border-destructive/30 bg-card p-5">
-      <h2 id="danger-heading" className="mb-2 text-sm font-medium">
+    <section aria-labelledby="danger-heading" className="rounded-cl-lg border border-cl-danger/30 bg-cl-surface p-4 ed-md:p-5">
+      <h3 id="danger-heading" className="mb-2 text-sm font-semibold">
         Delete profile
-      </h2>
+      </h3>
       <p className="mb-4 text-sm text-muted-foreground">Deletes this profile and its public page permanently.</p>
       <FormAlert message={error} />
       <AlertDialog onOpenChange={() => setTyped("")}>

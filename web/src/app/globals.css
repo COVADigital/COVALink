@@ -46,6 +46,30 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --color-cl-canvas: var(--cl-canvas);
+  --color-cl-surface: var(--cl-surface);
+  --color-cl-inset: var(--cl-inset);
+  --color-cl-ink: var(--cl-ink);
+  --color-cl-ink-2: var(--cl-ink-2);
+  --color-cl-line: var(--cl-line);
+  --color-cl-line-strong: var(--cl-line-strong);
+  --color-cl-accent: var(--cl-accent);
+  --color-cl-accent-ink: var(--cl-accent-ink);
+  --color-cl-danger: var(--cl-danger);
+  --color-cl-danger-wash: var(--cl-danger-wash);
+  --color-cl-warn: var(--cl-warn);
+  --color-cl-warn-wash: var(--cl-warn-wash);
+  --color-cl-ok: var(--cl-ok);
+  --color-cl-ok-wash: var(--cl-ok-wash);
+  --radius-cl-sm: var(--cl-radius-sm);
+  --radius-cl-md: var(--cl-radius-md);
+  --radius-cl-lg: var(--cl-radius-lg);
+}
+
+/* Editor layout modes: phone < 45rem ≤ tablet < 75rem ≤ desktop. In rem, so 200% zoom moves down a mode. */
+@theme {
+  --breakpoint-ed-md: 45rem;
+  --breakpoint-ed-lg: 75rem;
 }
 
 :root {
@@ -81,6 +105,103 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /*
+   * COVALink semantic dashboard tokens. Light only; dark mode is deferred.
+   * They style the dashboard, never a public profile: themes keep their own
+   * --pp-* properties and contrast rules.
+   */
+  --cl-canvas: oklch(0.975 0.004 200);
+  --cl-surface: oklch(1 0 0);
+  --cl-inset: oklch(0.955 0.006 200);
+  --cl-ink: oklch(0.21 0.02 230);
+  --cl-ink-2: oklch(0.45 0.018 230); /* ≥ 6.5:1 on canvas, surface and inset */
+  --cl-line: oklch(0.9 0.008 210);
+  --cl-line-strong: oklch(0.62 0.015 220); /* control borders, ≥ 3:1 */
+  --cl-accent: oklch(0.47 0.09 200); /* Harbor teal: Publish, selection and focus only */
+  --cl-accent-ink: oklch(0.99 0 0);
+  --cl-danger: oklch(0.5 0.17 27);
+  --cl-danger-wash: oklch(0.965 0.02 27);
+  --cl-warn: oklch(0.45 0.1 70);
+  --cl-warn-wash: oklch(0.97 0.035 85);
+  --cl-ok: oklch(0.44 0.1 155);
+  --cl-ok-wash: oklch(0.965 0.03 155);
+  --cl-radius-sm: 6px;
+  --cl-radius-md: 8px;
+  --cl-radius-lg: 16px;
+}
+
+/*
+ * The focused editor shell maps the shadcn variables onto the COVALink
+ * tokens for its own subtree only; other dashboard pages keep the default look.
+ */
+.editor-scope {
+  --background: var(--cl-canvas);
+  --foreground: var(--cl-ink);
+  --card: var(--cl-surface);
+  --card-foreground: var(--cl-ink);
+  --popover: var(--cl-surface);
+  --popover-foreground: var(--cl-ink);
+  --primary: var(--cl-accent);
+  --primary-foreground: var(--cl-accent-ink);
+  --secondary: var(--cl-inset);
+  --secondary-foreground: var(--cl-ink);
+  --muted: var(--cl-inset);
+  --muted-foreground: var(--cl-ink-2);
+  --accent: var(--cl-inset);
+  --accent-foreground: var(--cl-ink);
+  --destructive: var(--cl-danger);
+  --border: var(--cl-line);
+  --input: var(--cl-line-strong);
+  --ring: var(--cl-accent);
+  --radius: var(--cl-radius-md);
+  background: var(--cl-canvas);
+  color: var(--cl-ink);
+}
+.editor-scope ::selection {
+  background: color-mix(in oklch, var(--cl-accent) 22%, transparent);
+}
+/*
+ * Target sizes in the editor shell: 40 px on desktop, 44 px below 75rem,
+ * where touch is likely. Switches keep their look and grow their hit area.
+ * Unlayered on purpose: these minimums must win over component utilities
+ * (`h-8`, `after:-inset-y-2`). `asChild` triggers carry their own data-slot.
+ */
+.editor-scope
+  :is(
+    [data-slot="button"],
+    [data-slot="select-trigger"],
+    [data-slot="alert-dialog-trigger"],
+    [data-slot="dialog-trigger"],
+    [data-slot="dropdown-menu-trigger"],
+    [data-slot="popover-trigger"]
+  ) {
+  min-height: 2.5rem;
+}
+.editor-scope [data-size^="icon"] {
+  min-width: 2.5rem;
+}
+.editor-scope [data-slot="switch"]::after {
+  inset-block: -11px;
+}
+@media (max-width: 74.99rem) {
+  .editor-scope
+    :is(
+      [data-slot="button"],
+      [data-slot="select-trigger"],
+      [data-slot="alert-dialog-trigger"],
+      [data-slot="dialog-trigger"],
+      [data-slot="dropdown-menu-trigger"],
+      [data-slot="popover-trigger"]
+    ) {
+    min-height: 2.75rem;
+  }
+  .editor-scope [data-size^="icon"] {
+    min-width: 2.75rem;
+  }
+  .editor-scope [data-slot="switch"]::after {
+    inset-block: -13px;
+  }
 }
 
 .dark {
@@ -544,6 +665,29 @@
   }
   .pp-embed-frame:focus-visible {
     outline-offset: -2px;
+  }
+  /*
+   * Linked selection: the editor marks the selected block in its preview.
+   * Drawn with dashboard tokens on top of the theme, never part of a public page.
+   */
+  .editor-scope .pp-block[data-editor-selected] {
+    position: relative;
+    border-radius: 4px;
+    outline: 2px solid var(--cl-accent);
+    outline-offset: 4px;
+  }
+  .editor-scope .pp-block[data-editor-selected]::before {
+    content: "Editing";
+    position: absolute;
+    z-index: 1;
+    top: -0.85rem;
+    right: 0.5rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 4px;
+    background: var(--cl-accent);
+    color: var(--cl-accent-ink);
+    font: 600 0.6875rem/1.4 var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: 0;
   }
   .pp-incomplete {
     margin: 0;

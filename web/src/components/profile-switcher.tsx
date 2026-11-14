@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
+import { cn } from "cn";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { selectProfileAction } from "@/features/profiles/actions";
 import { navigateWithGuard } from "@/lib/navigation-guard";
@@ -13,7 +14,16 @@ export interface SwitcherProfile {
 }
 
 /** Chooses the dashboard's active profile; the server re-checks ownership. */
-export function ProfileSwitcher({ profiles, activeId }: { profiles: SwitcherProfile[]; activeId: string | null }) {
+export function ProfileSwitcher({
+  profiles,
+  activeId,
+  triggerClassName,
+}: {
+  profiles: SwitcherProfile[];
+  activeId: string | null;
+  /** Lets the focused editor shell meet its 40/44 px target sizes. */
+  triggerClassName?: string;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +48,13 @@ export function ProfileSwitcher({ profiles, activeId }: { profiles: SwitcherProf
   return (
     <div className="flex items-center gap-2">
       <Select value={activeId ?? undefined} onValueChange={onChange} disabled={pending}>
-        <SelectTrigger ref={trigger} size="sm" aria-label="Active profile" className="max-w-44" data-testid="profile-switcher">
+        <SelectTrigger
+          ref={trigger}
+          size="sm"
+          aria-label="Active profile"
+          className={cn("max-w-44", triggerClassName)}
+          data-testid="profile-switcher"
+        >
           <SelectValue placeholder="Choose profile" />
         </SelectTrigger>
         <SelectContent>

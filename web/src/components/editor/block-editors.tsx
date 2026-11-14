@@ -43,9 +43,9 @@ export const blockFieldId = (blockId: string, field: string) => `blk-${blockId}-
 export const rowControlId = (blockId: string, index: number, control: "up" | "down" | "remove") =>
   `${blockFieldId(blockId, `items.${index}`)}-${control}`;
 
-/** 44 px tall below `sm`, the compact size above (every editor control is a 44 px target on phones). */
-export const TOUCH_TARGET = "max-sm:min-h-11";
-export const TOUCH_ICON = "max-sm:size-11";
+/** 40 px on desktop, 44 px below 75rem, where touch is likely. */
+export const TOUCH_TARGET = "min-h-10 max-ed-lg:min-h-11";
+export const TOUCH_ICON = "size-10 max-ed-lg:size-11";
 
 /** The field focused when a block is added. */
 export const FIRST_FIELD: Record<EditableBlockType, string> = {
