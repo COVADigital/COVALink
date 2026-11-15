@@ -115,7 +115,7 @@ test("adds all five block types with inline validation and focus, and they persi
   expect(await url0.getAttribute("aria-describedby")).toContain(`${await url0.getAttribute("id")}-error`);
   await expect(preview(page)).toContainText("Incomplete social links");
   await page.getByRole("button", { name: "Save draft" }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "Some blocks need attention" })).toBeVisible();
+  await expect(page.getByTestId("draft-needs-attention").filter({ visible: true })).toContainText("saved, but it can't be published yet");
   await expect(url0).toBeFocused();
   await url0.fill("github.com/cora");
   await expect(url0).not.toHaveAttribute("aria-invalid", "true");

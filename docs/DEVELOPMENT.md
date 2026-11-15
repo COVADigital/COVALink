@@ -130,7 +130,7 @@ release/               release pins, the source-bundle tooling and the candidate
 **Principles the code follows:**
 - **Authorization lives in the services,** not only in pages or hidden controls. Every service call re-checks the session or the actor's role, and every query is scoped to the resources the caller owns.
 - **One rendering path:** the public page and the editor preview use the same renderer and the same validated data, so the preview shows what will be published.
-- **Profiles are draft and published documents.** The editor writes the draft under an expected revision; publishing copies a validated draft. Public pages read only the published snapshot and check visibility on every request.
+- **Profiles are draft and published documents.** The editor writes the draft under an expected revision; publishing copies a validated draft. A draft that doesn't validate yet is kept as the editor sent it under `incomplete` in the draft document, beside the last valid draft, which it never changes; the server refuses to publish it until it passes the same validation as any other draft, and it is never copied into the published snapshot. Public pages read only the published snapshot and check visibility on every request.
 - **Blocks are typed and versioned.** Each block type has a strict schema per version, an editor and a renderer. A stored block the code can't reproduce exactly protects its draft rather than being rewritten.
 - **Input is untrusted until validated on the server,** and errors returned to clients contain only fixed messages.
 - **Operational endpoints and logs use fixed vocabularies,** never hosts, connection strings or secrets.

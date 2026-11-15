@@ -95,9 +95,9 @@ test("adds an image block with upload, inline validation and focus; it persists 
   await expect(picker(page).getByTestId("media-empty")).toHaveText("No images uploaded yet.");
   await expect(preview(page)).toContainText("Incomplete image");
 
-  // Saving with nothing chosen reveals the problem and focuses the upload control.
+  // Saving with nothing chosen keeps the unfinished block, reveals the problem and focuses the upload control.
   await page.getByRole("button", { name: "Save draft" }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "Some blocks need attention" })).toBeVisible();
+  await expect(page.getByTestId("draft-needs-attention").filter({ visible: true })).toContainText("saved, but it can't be published yet");
   await expect(picker(page).getByTestId("media-error")).toHaveText("Choose or upload an image");
   await expect(uploadButton).toBeFocused();
 

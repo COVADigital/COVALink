@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { BlockListErrors } from "@/lib/errors";
+import { isMediaUrl } from "@/lib/validation/media";
 import { parseBlock, type Block } from "./block";
-import { BLOCK_DEFINITIONS, BLOCK_INPUT_SCHEMAS, isEditableBlockType, type EditableBlockType } from "./definitions";
+import { BLOCK_DEFINITIONS, BLOCK_INPUT_SCHEMAS, EDITABLE_BLOCK_TYPES, isEditableBlockType, type EditableBlockType } from "./definitions";
 
 /**
  * Client block-list contract. A client sends the
@@ -123,8 +124,37 @@ export type ImageMediaLookup = (src: string) => { width: number; height: number 
 
 export const IMAGE_NOT_IN_LIBRARY = "This image isn't in your library any more. Choose another image.";
 
-/** `blocks` is the parsed view (for whole-document validation and responses); `write` is what to store, in the same order. */
-export type ResolveResult = { ok: true; blocks: Block[]; write: unknown[] } | { ok: false; errors: BlockListErrors };
+/**
+ * A block as an unfinished draft may keep it: a well-formed envelope around
+ * the kind of config the editor's forms produce (text, a switch, a social
+ * block's rows), bounded in size. Its content isn't validated, so it is never
+ * rendered publicly; publishing validates it like any client block.
+ * `resolveBlockList` decides which lists qualify.
+ */
+const draftConfigSchema = z
+  .record(
+    z.string().max(40),
+    z.union([
+      z.string().max(5000),
+      z.boolean(),
+      z.array(z.strictObject({ platform: z.string().max(100), url: z.string().max(5000) })).max(50),
+    ]),
+  )
+  .refine((config) => Object.keys(config).length <= 40);
+export const draftBlockSchema = z.strictObject({ id: z.uuid(), type: z.enum(EDITABLE_BLOCK_TYPES), visible: z.boolean(), config: draftConfigSchema });
+const draftBlockListSchema = z.array(draftBlockSchema).max(MAX_BLOCKS);
+export type DraftBlockInput = z.output<typeof draftBlockSchema>;
+
+/**
+ * `blocks` is the parsed view (for whole-document validation and responses);
+ * `write` is what to store, in the same order. `draft` is the list as an
+ * unfinished draft can keep it, present only when every entry is a block the
+ * editor could have sent (its own id and type, checked against the stored
+ * blocks) even if its content doesn't validate.
+ */
+export type ResolveResult =
+  | { ok: true; blocks: Block[]; write: unknown[]; draft?: DraftBlockInput[] }
+  | { ok: false; errors: BlockListErrors; draft?: DraftBlockInput[] };
 
 /**
  * Validates a client block list against the stored blocks. Never trusts client
@@ -142,30 +172,47 @@ export function resolveBlockList(input: unknown, stored: StoredBlocks, images?: 
   const items: BlockListErrors["items"] = [];
   const blocks: Block[] = [];
   const write: unknown[] = [];
+  const sent: unknown[] = [];
   const seen = new Set<string>();
+  // A problem with a block's envelope, not its content: such a list is never kept, even as a draft.
+  let malformed = false;
+  const refuse = (item: BlockListErrors["items"][number]) => {
+    malformed = true;
+    items.push(item);
+  };
 
   input.forEach((raw, index) => {
     const env = blockEnvelope.safeParse(raw);
-    if (!env.success) return items.push({ index, message: "This block is malformed." });
+    if (!env.success) return refuse({ index, message: "This block is malformed." });
 
     const { id, type, visible, config } = env.data;
-    if (!uuid.safeParse(id).success) return items.push({ index, message: "This block has an invalid id." });
-    if (seen.has(id)) return items.push({ index, message: "Two blocks share the same id." });
+    if (!uuid.safeParse(id).success) return refuse({ index, message: "This block has an invalid id." });
+    if (seen.has(id)) return refuse({ index, message: "Two blocks share the same id." });
     seen.add(id);
 
-    if (!isEditableBlockType(type)) return items.push({ index, id, message: "This kind of block can't be created or edited yet." });
+    if (!isEditableBlockType(type)) return refuse({ index, id, message: "This kind of block can't be created or edited yet." });
     const knownType = stored.knownTypes.get(id);
-    if (knownType !== undefined && knownType !== type) return items.push({ index, id, message: "A block can't change its type." });
+    if (knownType !== undefined && knownType !== type) return refuse({ index, id, message: "A block can't change its type." });
+    sent.push({ id, type, visible, config });
 
     const parsed = BLOCK_INPUT_SCHEMAS[type].safeParse(config);
-    if (!parsed.success) return items.push({ index, id, ...configProblems(parsed.error) });
+    if (!parsed.success) {
+      // Content the editor's forms can't produce is refused, not kept: a key they don't have, or an
+      // image block whose source is anything but unchosen or one of the owner's uploads.
+      const unknownKey = parsed.error.issues.some((issue) => issue.code === "unrecognized_keys");
+      const src = type === "image" ? (config as { src?: unknown } | null)?.src : "";
+      // Sizes are asked for only once the keys are known to be the form's own.
+      const foreignImage = () => src !== "" && src !== undefined && (!isMediaUrl(src) || !images || "error" in images(src));
+      const item = { index, id, ...configProblems(parsed.error) };
+      return unknownKey || foreignImage() ? refuse(item) : items.push(item);
+    }
     let canonical: unknown = parsed.data;
     if (type === "image") {
       const image = parsed.data as { src: string };
       const size = images?.(image.src) ?? { error: IMAGE_NOT_IN_LIBRARY };
-      if ("error" in size) return items.push({ index, id, fields: { src: [size.error] } });
+      if ("error" in size) return refuse({ index, id, fields: { src: [size.error] } });
       const stamped = BLOCK_DEFINITIONS.image.schema.safeParse({ ...image, width: size.width, height: size.height });
-      if (!stamped.success) return items.push({ index, id, ...configProblems(stamped.error) });
+      if (!stamped.success) return refuse({ index, id, ...configProblems(stamped.error) });
       canonical = stamped.data;
     }
     const block = { id, type, version: BLOCK_DEFINITIONS[type].version, visible, config: canonical } as Block;
@@ -173,5 +220,7 @@ export function resolveBlockList(input: unknown, stored: StoredBlocks, images?: 
     write.push(block);
   });
 
-  return items.length ? { ok: false, errors: { list: [], items } } : { ok: true, blocks, write };
+  const kept = malformed ? undefined : draftBlockListSchema.safeParse(sent);
+  const draft = kept?.success ? { draft: kept.data } : {};
+  return items.length ? { ok: false, errors: { list: [], items }, ...draft } : { ok: true, blocks, write, ...draft };
 }

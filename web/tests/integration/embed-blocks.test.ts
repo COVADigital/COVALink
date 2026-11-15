@@ -22,6 +22,7 @@ import { bootstrapSuperAdmin } from "@/features/setup/service";
 import { AppError } from "@/lib/errors";
 import { signUp } from "../support/auth-http";
 import { resetDatabase, testSql } from "../support/db";
+import { expectKeptUnfinished } from "../support/unfinished";
 import { TEST_APP_URL, TEST_SETUP_TOKEN } from "../support/test-env";
 
 const BROWSER = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
@@ -145,7 +146,10 @@ describe("edit, publish and discard", () => {
   });
 });
 
-describe("refused writes", () => {
+describe("refused and unfinished writes", () => {
+  // Nothing the editor sends: refused outright, even as a draft. Every other entry is content its
+  // forms can produce: never published, kept only as an unfinished draft.
+  const MALFORMED = new Set(["an unknown config key", "a client version inside the config", "a client version on the block", "a preserve reference"]);
   const BAD: [string, unknown][] = [
     ["a host suffix", V(1, "https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ")],
     ["http:", V(1, "http://www.youtube.com/watch?v=dQw4w9WgXcQ")],
@@ -167,7 +171,22 @@ describe("refused writes", () => {
     ["a preserve reference", { id: ID(1), preserve: true }],
   ];
 
-  it.each(BAD)("refuses %s atomically on save and save-and-publish", async (_label, block) => {
+  it.each(BAD.filter(([label]) => !MALFORMED.has(label)))("keeps %s only as an unfinished draft, and refuses to publish it", async (_label, block) => {
+    const p = await publish(alice, profileId, 0, [V(9)]);
+    const before = await rawRow(profileId);
+    const refused = await failure(publish(alice, profileId, p.revision, [block]));
+    expect(refused?.code).toBe("VALIDATION");
+    expect(refused?.blockErrors?.items).toHaveLength(1);
+    expect(await rawRow(profileId)).toEqual(before);
+
+    const kept = await save(alice, profileId, p.revision, [block]);
+    expect(kept.needsAttention?.blockErrors?.items).toHaveLength(1);
+    await expectKeptUnfinished(profileId, before);
+    expect((await failure(publish(alice, profileId, kept.revision)))?.code).toBe("VALIDATION");
+    expect(blockTypes((await publicHtml("ana"))!)).toEqual(["video"]);
+  });
+
+  it.each(BAD.filter(([label]) => MALFORMED.has(label)))("refuses %s atomically on save and save-and-publish", async (_label, block) => {
     const p = await publish(alice, profileId, 0, [V(9)]);
     const before = await rawRow(profileId);
     for (const write of [() => save(alice, profileId, p.revision, [block]), () => publish(alice, profileId, p.revision, [block])]) {
@@ -179,8 +198,8 @@ describe("refused writes", () => {
   });
 
   it("reports the problem on the field, in the owner's terms", async () => {
-    const err = await failure(save(alice, profileId, 0, [V(1, SPOTIFY)]));
-    expect(err?.blockErrors).toEqual({ list: [], items: [{ index: 0, id: ID(1), fields: { url: ["That's a Spotify link. Use a Music block for it."] } }] });
+    const saved = await save(alice, profileId, 0, [V(1, SPOTIFY)]);
+    expect(saved.needsAttention?.blockErrors).toEqual({ list: [], items: [{ index: 0, id: ID(1), fields: { url: ["That's a Spotify link. Use a Music block for it."] } }] });
   });
 });
 

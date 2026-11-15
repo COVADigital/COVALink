@@ -98,8 +98,9 @@ test("adds blocks of all four types with inline validation, and they persist in 
   await expect(card(page, "Shop").getByText("Enter a valid http(s) address, like example.com")).toBeVisible();
   await expect(page.getByTestId("profile-preview").filter({ visible: true })).toContainText("Incomplete link");
 
+  // An unfinished block is saved as typed; the draft says it needs attention and leads to the field.
   await page.getByRole("button", { name: "Save draft" }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "Some blocks need attention" })).toBeVisible();
+  await expect(page.getByTestId("draft-needs-attention").filter({ visible: true })).toContainText("saved, but it can't be published yet");
   await expect(url).toBeFocused();
   await url.fill("shop.example.com");
   await expect(url).not.toHaveAttribute("aria-invalid", "true");

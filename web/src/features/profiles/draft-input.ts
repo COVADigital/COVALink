@@ -1,6 +1,6 @@
 import { z } from "zod";
-import type { BlockInput } from "@/features/blocks/input";
-import { PRESET_IDS, type ThemeInput } from "@/features/themes/schema";
+import { draftBlockSchema, MAX_BLOCKS, type BlockInput } from "@/features/blocks/input";
+import { draftThemeSchema, PRESET_IDS, type ThemeInput } from "@/features/themes/schema";
 import { optionalImageSrcSchema } from "@/lib/validation/media";
 
 /**
@@ -51,6 +51,62 @@ export const draftPatchSchema = z
   })
   .strict()
   .refine((p) => p.theme === undefined || p.replaceTheme === undefined, "Send a theme or a replacement preset, not both");
+
+const TEXT_MAX = 5000;
+const draftHeader = z.strictObject({
+  displayName: z.string().max(TEXT_MAX),
+  bio: z.string().max(TEXT_MAX),
+  avatarUrl: z.string().max(TEXT_MAX).optional(),
+});
+const draftSeo = z.strictObject({
+  title: z.string().max(TEXT_MAX).optional(),
+  description: z.string().max(TEXT_MAX).optional(),
+  noindex: z.boolean(),
+});
+
+/**
+ * What "Save draft" accepts: the same keys as `draftPatchSchema`, with the
+ * text only bounded in size. A patch that also passes `draftPatchSchema` and
+ * the service's checks is saved as a valid draft; otherwise it is kept as
+ * an unfinished draft. Publishing always requires `draftPatchSchema`.
+ */
+export const savablePatchSchema = z
+  .strictObject({
+    header: draftHeader,
+    seo: draftSeo,
+    blocks: z.array(z.unknown()).optional(),
+    theme: z.unknown().optional(),
+    replaceTheme: z.enum(PRESET_IDS).optional(),
+  })
+  .refine((p) => p.theme === undefined || p.replaceTheme === undefined, "Send a theme or a replacement preset, not both");
+
+export type SavablePatch = z.output<typeof savablePatchSchema>;
+
+const messages = z.record(z.string(), z.array(z.string()));
+
+/**
+ * An unfinished draft, stored under `incomplete` in the draft document beside
+ * the last valid draft: what the editor sent, and why it can't be published
+ * yet. It is never copied into the published snapshot.
+ */
+export const incompleteDraftSchema = z.object({
+  header: draftHeader,
+  seo: draftSeo,
+  blocks: z.array(draftBlockSchema).max(MAX_BLOCKS).optional(),
+  theme: draftThemeSchema.optional(),
+  issues: z.object({
+    message: z.string(),
+    fieldErrors: messages.optional(),
+    blockErrors: z
+      .object({
+        list: z.array(z.string()),
+        items: z.array(z.object({ index: z.number(), id: z.string().optional(), message: z.string().optional(), fields: messages.optional() })),
+      })
+      .optional(),
+  }),
+});
+
+export type IncompleteDraft = z.output<typeof incompleteDraftSchema>;
 
 export type DraftPatch = z.output<typeof draftPatchSchema>;
 export type DraftPatchInput = Omit<z.input<typeof draftPatchSchema>, "blocks" | "theme"> & { blocks?: BlockInput[]; theme?: ThemeInput };

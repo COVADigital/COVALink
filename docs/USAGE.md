@@ -20,7 +20,8 @@ Open **Profiles** in the dashboard to create a profile and to switch between you
 The editor shows a live preview beside your changes.
 
 - **Save draft** keeps your changes in the profile's **draft**. Visitors never see the draft.
-- **Publish** saves the draft and makes it the public page. Publishing is refused if the theme doesn't have enough contrast to be readable.
+- A draft doesn't have to be finished to be saved. Missing or invalid details (an empty name, a link without a valid address, an image background with no image chosen) are saved as you typed them and marked **Saved · needs attention**, with each problem shown on its field. They are still there when you come back.
+- **Publish** saves the draft and makes it the public page. Publishing waits until every highlighted problem is fixed, and is refused if the theme doesn't have enough contrast to be readable. Until then your public page stays as it was.
 - **Discard changes** returns the draft to the published version.
 - **Unpublish** takes the public page offline without deleting anything.
 - If the same profile is open in two places, saving an older copy is refused rather than overwriting newer changes. Reload to get the current version.

@@ -56,7 +56,9 @@ import {
   toViewBlocks,
   validateItem,
   type EditableItem,
+  type ImageSizes,
   type ItemValidation,
+  type LoadedBlock,
   type SocialRow,
 } from "./block-items";
 
@@ -74,14 +76,34 @@ const addId = (type: EditableBlockType) => `add-block-${type}`;
 
 type ItemErrors = { message?: string; fields?: Record<string, string[]> };
 
-/** State and operations for the block list; owned by the profile editor. */
-export function useBlockList(initial: readonly Block[]) {
-  const [items, setItems] = useState<EditableItem[]>(() => toEditorItems(initial));
-  const [saved, setSaved] = useState(() => serializeItems(toEditorItems(initial)));
+/** Server block errors by the items that were sent (by id, else by position). */
+function serverErrors(errors: BlockListErrors, sent: readonly EditableItem[]) {
+  const byId: Record<string, ItemErrors> = {};
+  const list = [...errors.list];
+  for (const e of errors.items) {
+    const id = e.id ?? sent[e.index]?.id;
+    if (id) byId[id] = { message: e.message, fields: e.fields };
+    else if (e.message) list.push(e.message);
+  }
+  return { list, byId };
+}
+
+/**
+ * State and operations for the block list; owned by the profile editor.
+ * `kept` reopens an unfinished draft: its blocks as they were sent, with the
+ * problems reported when it was saved.
+ */
+export function useBlockList(initial: readonly Block[], kept?: { blocks?: readonly LoadedBlock[]; errors?: BlockListErrors; sizes?: ImageSizes }) {
+  const [items, setItems] = useState<EditableItem[]>(() => toEditorItems(kept?.blocks ?? initial, kept?.sizes));
+  // The items as last saved: what "unsaved changes" compares with and what leaving without saving restores.
+  const [savedItems, setSavedItems] = useState(items);
+  const saved = useMemo(() => serializeItems(savedItems), [savedItems]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
-  const [submitted, setSubmitted] = useState(false);
-  const [server, setServer] = useState<{ list: string[]; byId: Record<string, ItemErrors> }>({ list: [], byId: {} });
+  const [submitted, setSubmitted] = useState(kept !== undefined);
+  const [server, setServer] = useState<{ list: string[]; byId: Record<string, ItemErrors> }>(() =>
+    kept?.errors ? serverErrors(kept.errors, items) : { list: [], byId: {} },
+  );
   const [announcement, setAnnouncement] = useState("");
   // The block being worked on; the editor marks it in the preview.
   const [selected, setSelected] = useState<string | null>(null);
@@ -94,10 +116,11 @@ export function useBlockList(initial: readonly Block[]) {
     pendingFocus.current = null;
     for (const id of ids) {
       const el = document.getElementById(id) as HTMLButtonElement | null;
-      if (el && !el.disabled) {
-        el.focus();
-        return;
-      }
+      if (!el || el.disabled) continue;
+      // Disabled only by the editor's fieldset while a request is in flight: focus it once that ends.
+      if (el.matches(":disabled")) pendingFocus.current = ids;
+      else el.focus();
+      return;
     }
   });
 
@@ -125,7 +148,7 @@ export function useBlockList(initial: readonly Block[]) {
   function load(blocks: readonly Block[]) {
     const next = toEditorItems(blocks);
     setItems(next);
-    setSaved(serializeItems(next));
+    setSavedItems(next);
     setSubmitted(false);
     setTouched(new Set());
     setServer({ list: [], byId: {} });
@@ -145,6 +168,10 @@ export function useBlockList(initial: readonly Block[]) {
     toInput: () => toBlockInput(items),
     /** After a successful save/publish/discard: adopt the server's canonical blocks. */
     load,
+    /** After an unfinished draft was saved: the items sent are the saved ones, exactly as typed. */
+    markSaved: (sent: EditableItem[]) => setSavedItems(sent),
+    /** Drops unsaved edits, going back to the items as last saved. */
+    revert: () => setItems(savedItems),
 
     errorsFor(item: EditableItem): { message?: string; fields: Record<string, string | undefined>; attention: boolean } {
       const s = server.byId[item.id];
@@ -173,15 +200,10 @@ export function useBlockList(initial: readonly Block[]) {
 
     /** Maps server block errors onto the items that were sent (by id, else by position). */
     applyServerErrors(errors: BlockListErrors, sent: readonly EditableItem[]) {
-      const byId: Record<string, ItemErrors> = {};
-      const list = [...errors.list];
-      for (const e of errors.items) {
-        const id = e.id ?? sent[e.index]?.id;
-        if (id) byId[id] = { message: e.message, fields: e.fields };
-        else if (e.message) list.push(e.message);
-      }
-      setServer({ list, byId });
-      const ids = Object.keys(byId);
+      const next = serverErrors(errors, sent);
+      setServer(next);
+      setSubmitted(true);
+      const ids = Object.keys(next.byId);
       expand(ids);
       if (ids[0]) focus(ctrlId(ids[0], "toggle"));
     },

@@ -66,6 +66,7 @@ async function Editor({ params }: Pick<PageProps<"/dashboard/profiles/[id]">, "p
           revision: profile.draftRevision,
           draft: profile.draft,
           protectedBlocks: profile.protectedBlocks,
+          incomplete: profile.incomplete,
           appearance: profile.appearance,
           media,
         }}

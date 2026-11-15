@@ -112,43 +112,54 @@ export const MAX_OVERLAY = 0.9;
  * service) and a black overlay opacity; solid and gradient backgrounds must
  * not carry either.
  */
-const inputBackground = z
-  .strictObject({
-    type: z.enum(["solid", "gradient", "image"], "Choose a solid, gradient or image background"),
-    color: inputHex,
-    gradientTo: inputHex,
-    gradientAngle: angle,
-    imageUrl: z.string().max(100).optional(),
-    overlayOpacity: z.number().min(0, "Use 0% to 90%").max(MAX_OVERLAY, "Use 0% to 90%").optional(),
-  })
-  .superRefine((bg, ctx) => {
-    if (bg.type === "image") {
-      if (bg.imageUrl === undefined || !isMediaUrl(bg.imageUrl)) {
-        ctx.addIssue({ code: "custom", path: ["imageUrl"], message: "Choose a background image from your library" });
-      }
-      if (bg.overlayOpacity === undefined) ctx.addIssue({ code: "custom", path: ["overlayOpacity"], message: "Choose how dark the overlay is" });
-    } else {
-      if (bg.imageUrl !== undefined) ctx.addIssue({ code: "custom", path: ["imageUrl"], message: "Only image backgrounds have an image" });
-      if (bg.overlayOpacity !== undefined) ctx.addIssue({ code: "custom", path: ["overlayOpacity"], message: "Only image backgrounds have an overlay" });
-    }
-  });
-
-export const themeInputSchema = z.strictObject({
-  preset: z.enum(PRESET_IDS, "Choose one of the presets"),
-  background: inputBackground,
-  text: z.strictObject({ color: inputHex, muted: inputHex }),
-  accent: inputHex,
-  button: z.strictObject({
-    variant: z.enum(BUTTON_VARIANTS),
-    color: inputHex,
-    textColor: inputHex,
-    radius: z.enum(RADII),
-    shadow: z.enum(SHADOWS),
-    borderWidth,
-  }),
-  font: z.strictObject({ body: z.enum(FONT_IDS), heading: z.enum(FONT_IDS), scale: z.enum(SCALES) }),
-  layout: z.strictObject({ width: z.enum(WIDTHS), spacing: z.enum(SPACINGS), align: z.enum(ALIGNS) }),
-  avatar: z.strictObject({ shape: z.enum(AVATAR_SHAPES), size: z.enum(AVATAR_SIZES), ring: z.boolean() }),
+const inputBackgroundFields = z.strictObject({
+  type: z.enum(["solid", "gradient", "image"], "Choose a solid, gradient or image background"),
+  color: inputHex,
+  gradientTo: inputHex,
+  gradientAngle: angle,
+  imageUrl: z.string().max(100).optional(),
+  overlayOpacity: z.number().min(0, "Use 0% to 90%").max(MAX_OVERLAY, "Use 0% to 90%").optional(),
 });
 
+/** `draft`: an image background may still be waiting for its image; nothing else is relaxed. */
+const backgroundRules = (draft: boolean) => (bg: z.output<typeof inputBackgroundFields>, ctx: z.RefinementCtx) => {
+  if (bg.type === "image") {
+    if (bg.imageUrl === undefined ? !draft : !isMediaUrl(bg.imageUrl)) {
+      ctx.addIssue({ code: "custom", path: ["imageUrl"], message: "Choose a background image from your library" });
+    }
+    if (bg.overlayOpacity === undefined) ctx.addIssue({ code: "custom", path: ["overlayOpacity"], message: "Choose how dark the overlay is" });
+  } else {
+    if (bg.imageUrl !== undefined) ctx.addIssue({ code: "custom", path: ["imageUrl"], message: "Only image backgrounds have an image" });
+    if (bg.overlayOpacity !== undefined) ctx.addIssue({ code: "custom", path: ["overlayOpacity"], message: "Only image backgrounds have an overlay" });
+  }
+};
+
+const themeInput = <B extends z.ZodType<z.output<typeof inputBackgroundFields>>>(background: B) =>
+  z.strictObject({
+    preset: z.enum(PRESET_IDS, "Choose one of the presets"),
+    background,
+    text: z.strictObject({ color: inputHex, muted: inputHex }),
+    accent: inputHex,
+    button: z.strictObject({
+      variant: z.enum(BUTTON_VARIANTS),
+      color: inputHex,
+      textColor: inputHex,
+      radius: z.enum(RADII),
+      shadow: z.enum(SHADOWS),
+      borderWidth,
+    }),
+    font: z.strictObject({ body: z.enum(FONT_IDS), heading: z.enum(FONT_IDS), scale: z.enum(SCALES) }),
+    layout: z.strictObject({ width: z.enum(WIDTHS), spacing: z.enum(SPACINGS), align: z.enum(ALIGNS) }),
+    avatar: z.strictObject({ shape: z.enum(AVATAR_SHAPES), size: z.enum(AVATAR_SIZES), ring: z.boolean() }),
+  });
+
+export const themeInputSchema = themeInput(inputBackgroundFields.superRefine(backgroundRules(false)));
+
 export type ThemeInput = z.output<typeof themeInputSchema>;
+
+/**
+ * A theme an unfinished draft may keep: `themeInputSchema`, except that an
+ * image background may still be waiting for its image. It can be saved,
+ * never published; publishing uses `themeInputSchema`.
+ */
+export const draftThemeSchema = themeInput(inputBackgroundFields.superRefine(backgroundRules(true)));
