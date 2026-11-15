@@ -56,21 +56,34 @@ function initialRows(type: EditableBlockType, config: object): SocialRow[] | und
   return Array.isArray(items) ? toRows(items as { platform: string; url: string }[]) : [];
 }
 
-/** Every field of the type is present (defaults first), so unsaved-change detection is stable. */
-export function toEditorItems(blocks: readonly Block[]): EditableItem[] {
-  return blocks.flatMap((b): EditableItem[] =>
-    isEditableBlockType(b.type)
-      ? [
-          {
-            id: b.id,
-            type: b.type,
-            visible: b.visible,
-            values: { ...toValues(BLOCK_DEFINITIONS[b.type].defaults()), ...toValues(b.config) },
-            ...(b.type === "social" ? { rows: initialRows(b.type, b.config) } : {}),
-          },
-        ]
-      : [],
-  );
+/** A stored block, or one an unfinished draft kept as the editor sent it. */
+export type LoadedBlock = { id: string; type: string; version?: number; visible: boolean; config: object };
+/** Uploaded images and their sizes, for image blocks kept without them. */
+export type ImageSizes = readonly { url: string; width: number; height: number }[];
+
+/**
+ * Every field of the type is present (defaults first), so unsaved-change
+ * detection is stable. A kept image block has no stored size (the server
+ * stamps it on a valid save), so the preview takes it from `sizes`.
+ */
+export function toEditorItems(blocks: readonly LoadedBlock[], sizes?: ImageSizes): EditableItem[] {
+  return blocks.flatMap((b): EditableItem[] => {
+    if (!isEditableBlockType(b.type)) return [];
+    const size = b.type === "image" ? sizes?.find((a) => a.url === (b.config as { src?: unknown }).src) : undefined;
+    return [
+      {
+        id: b.id,
+        type: b.type,
+        visible: b.visible,
+        values: {
+          ...toValues(BLOCK_DEFINITIONS[b.type].defaults()),
+          ...toValues(b.config),
+          ...(size ? { width: String(size.width), height: String(size.height) } : {}),
+        },
+        ...(b.type === "social" ? { rows: initialRows(b.type, b.config) } : {}),
+      },
+    ];
+  });
 }
 
 export function createItem(type: EditableBlockType): EditableItem {

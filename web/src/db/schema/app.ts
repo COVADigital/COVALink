@@ -25,7 +25,9 @@ const updatedAt = timestamp("updated_at", { withTimezone: true })
 /**
  * A public page. One user may own several. Visual content lives in two JSONB
  * snapshots validated by `profileDocumentSchema`: `draft` (what the editor
- * changes) and `published` (what visitors see).
+ * changes) and `published` (what visitors see). `draft` may also hold an
+ * unfinished draft under `incomplete` (`incompleteDraftSchema`), which is
+ * never published.
  */
 export const profiles = pgTable(
   "profiles",

@@ -41,7 +41,7 @@ import type { BlockInput } from "@/features/blocks/input";
 import { publishAction, revertDraftAction, saveDraftAction, unpublishAction } from "@/features/profiles/actions";
 import type { ProfileDocument } from "@/features/profiles/document";
 import type { MediaLibrary } from "@/features/media/types";
-import type { DraftPatchInput } from "@/features/profiles/draft-input";
+import type { DraftPatchInput, IncompleteDraft } from "@/features/profiles/draft-input";
 import type { PresetId, ThemeConfig, ThemeInput } from "@/features/themes/schema";
 import type { BlockListErrors } from "@/lib/errors";
 import { guardedLink, navigateWithGuard, registerLeaveGuard, type ConfirmLeave } from "@/lib/navigation-guard";
@@ -60,6 +60,8 @@ export interface EditorProfile {
   draft: ProfileDocument;
   /** Stored draft blocks this version can't rewrite losslessly; saving is refused while > 0. */
   protectedBlocks: number;
+  /** The unfinished draft saved last, opened in place of `draft`; it can't be published until it validates. */
+  incomplete: IncompleteDraft | null;
   /** Whether the stored draft theme can be edited, is locked or is unreadable. */
   appearance: AppearanceInfo;
   /** The owner's uploaded images, or null if they couldn't be loaded. */
@@ -81,16 +83,19 @@ const formSchema = z.object({
 });
 type Values = z.infer<typeof formSchema>;
 
-function toValues(doc: ProfileDocument): Values {
+/** Form values of a stored draft, or of an unfinished one exactly as it was typed. */
+function toValues({ header, seo }: Pick<IncompleteDraft, "header" | "seo">): Values {
   return {
-    displayName: doc.header.displayName,
-    bio: doc.header.bio,
-    avatarUrl: doc.header.avatarUrl ?? "",
-    seoTitle: doc.settings.seo.title ?? "",
-    seoDescription: doc.settings.seo.description ?? "",
-    noindex: doc.settings.seo.noindex,
+    displayName: header.displayName,
+    bio: header.bio,
+    avatarUrl: header.avatarUrl ?? "",
+    seoTitle: seo.title ?? "",
+    seoDescription: seo.description ?? "",
+    noindex: seo.noindex,
   };
 }
+
+const headerOf = (doc: ProfileDocument) => ({ header: doc.header, seo: doc.settings.seo });
 
 /**
  * `theme` is sent only when the appearance changed: an omitted theme keeps
@@ -162,6 +167,10 @@ export function ProfileEditor({
   const [invalidText, setInvalidText] = useState<string | null>(null);
   const [op, setOp] = useState<EditorOp | null>(null);
   const [busy, startTransition] = useTransition();
+  // An unfinished draft, as it was saved: it opens in place of the last valid draft, with its problems shown.
+  const kept = profile.incomplete;
+  // The saved draft has problems; set by a save that kept it, cleared once a draft that validates is stored.
+  const [needsAttention, setNeedsAttention] = useState(kept !== null);
   const {
     register,
     handleSubmit,
@@ -171,13 +180,30 @@ export function ProfileEditor({
     getValues,
     setError,
     setFocus,
+    trigger,
     formState: { errors, isDirty },
-  } = useForm<Values>({ resolver: zodResolver(formSchema), defaultValues: toValues(profile.draft), shouldFocusError: false });
+  } = useForm<Values>({ resolver: zodResolver(formSchema), defaultValues: toValues(kept ?? headerOf(profile.draft)), shouldFocusError: false });
   const live = useWatch({ control });
   const noindex = useWatch({ control, name: "noindex" });
-  const blocks = useBlockList(profile.draft.blocks);
-  const appearance = useAppearance(profile.draft.theme, profile.appearance);
+  const blocks = useBlockList(
+    profile.draft.blocks,
+    // shortcut: a kept image block gets its preview size from the library, so it shows as unchosen if the library failed to load; store sizes with kept blocks if that matters.
+    kept ? { blocks: kept.blocks, errors: kept.issues.blockErrors, sizes: profile.media?.assets } : undefined,
+  );
+  const appearance = useAppearance(profile.draft.theme, profile.appearance, kept ? { theme: kept.theme, errors: kept.issues.fieldErrors } : undefined);
   const media = useMediaLibrary(profile.media);
+
+  // Reopening an unfinished draft shows its header problems as a submit would, so each clears as its field is corrected.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || !kept) return;
+    restored.current = true;
+    const avatarError = kept.issues.fieldErrors?.avatarUrl?.[0];
+    void handleSubmit(
+      () => {},
+      () => {},
+    )().then(() => avatarError && setError("avatarUrl", { type: "server", message: avatarError }));
+  }, [kept, handleSubmit, setError]);
   const avatar = live.avatarUrl ?? "";
   const avatarUploaded = isMediaUrl(avatar);
   // Uploaded images chosen here (saved or not) can't be deleted from the library.
@@ -235,27 +261,29 @@ export function ProfileEditor({
     };
   }, [navigationDirty, router]);
 
-  // The blocks and appearance the server last stored (the form keeps its own saved values).
-  const [saved, setSaved] = useState({ blocks: profile.draft.blocks, theme: profile.draft.theme, appearance: profile.appearance });
-
+  /** Adopts the blocks and appearance the server stored for a draft that validated. */
   function loadSaved(nextBlocks: typeof profile.draft.blocks | null, theme: ThemeConfig, info: AppearanceInfo) {
     if (nextBlocks) blocks.load(nextBlocks);
     appearance.load(theme, info);
-    setSaved((sv) => ({ blocks: nextBlocks ?? sv.blocks, theme, appearance: info }));
   }
 
   /**
    * Drops the unsaved edits before navigating: Next.js keeps a page it leaves
-   * mounted but hidden, so the edits would otherwise come back with it.
+   * mounted but hidden, so the edits would otherwise come back with it. What
+   * was last saved stays, unfinished or not (the form, the block list and the
+   * appearance each keep their own saved values).
    */
   function leaveWithoutSaving() {
     const proceed = pendingLeave;
     setPendingLeave(null);
     leaving.current = true;
-    reset();
+    reset(undefined, { keepIsSubmitted: needsAttention });
+    // The saved values of an unfinished draft still have their problems.
+    if (needsAttention) void trigger();
     metadataReset.current?.();
     setMetadataDirty(false);
-    loadSaved(saved.blocks, saved.theme, saved.appearance);
+    blocks.revert();
+    appearance.revert();
     setOutcome(null);
     setInvalidText(null);
     proceed?.();
@@ -320,31 +348,37 @@ export function ProfileEditor({
     show("design");
   }
 
+  /** Shows the problems the server found on the fields they belong to, and the section holding them. */
+  function showProblems(problems: { blockErrors?: BlockListErrors; fieldErrors?: Record<string, string[]> }, sent?: typeof blocks.items) {
+    if (problems.blockErrors && sent) {
+      blocks.applyServerErrors(problems.blockErrors, sent);
+      show("content");
+    }
+    const avatarError = problems.fieldErrors?.avatarUrl?.[0];
+    if (avatarError) {
+      setError("avatarUrl", { type: "server", message: avatarError });
+      show("profile");
+    }
+    const themeErrors = Object.keys(problems.fieldErrors ?? {}).filter((k) => k.startsWith("theme."));
+    if (themeErrors.length) {
+      appearance.applyServerErrors(problems.fieldErrors ?? {});
+      revealAppearanceField(themeErrors[0].slice("theme.".length));
+    }
+  }
+
   function fail(
     kind: EditorOp,
     result: { error: string; code?: string; blockErrors?: BlockListErrors; fieldErrors?: Record<string, string[]> },
     sent?: typeof blocks.items,
   ) {
-    if (result.blockErrors && sent) {
-      blocks.applyServerErrors(result.blockErrors, sent);
-      show("content");
-    }
-    const avatarError = result.fieldErrors?.avatarUrl?.[0];
-    if (avatarError) {
-      setError("avatarUrl", { type: "server", message: avatarError });
-      show("profile");
-    }
-    const themeErrors = Object.keys(result.fieldErrors ?? {}).filter((k) => k.startsWith("theme."));
-    if (themeErrors.length) {
-      appearance.applyServerErrors(result.fieldErrors ?? {});
-      revealAppearanceField(themeErrors[0].slice("theme.".length));
-    }
+    showProblems(result, sent);
     const reason = result.code === "CONFLICT" ? "conflict" : result.code === "VALIDATION" ? "invalid" : "other";
     setOutcome({ kind: "error", op: kind, reason, text: result.error });
-    if (reason === "invalid") setInvalidText(result.error);
+    // A refused save is a failed save; only publishing is held back until the content changes.
+    if (reason === "invalid" && kind !== "save") setInvalidText(result.error);
   }
 
-  /** Content failed a client check: report it and keep Save and Publish blocked until the content changes. */
+  /** Content failed a client check when publishing: report it and keep Publish blocked until the content changes. */
   function markInvalid(kind: EditorOp, text: string) {
     setOutcome({ kind: "error", op: kind, reason: "invalid", text });
     setInvalidText(text);
@@ -373,24 +407,53 @@ export function ProfileEditor({
     if (first) requestAnimationFrame(() => setFocus(first));
   };
 
-  const save = handleSubmit((values) => {
-    if (!ready("save")) return;
+  /**
+   * Saves the draft as it is. Content that wouldn't pass publishing is saved
+   * too, as typed, and the server says what needs attention; only an
+   * appearance field whose text isn't a value yet has nothing to save.
+   */
+  const saveWith = (values: Values, headerProblems = false) => {
+    const [unfinished] = appearance.unfinished;
+    if (unfinished) {
+      revealAppearanceField(unfinished);
+      return setOutcome({ kind: "error", op: "save", reason: "invalid", text: APPEARANCE_INVALID });
+    }
     const sent = blocks.items;
     act("save", async () => {
       const patch = toPatch(values, { blocks: blocks.toInput(), theme: appearance.toInput() });
       const result = await saveDraftAction(profile.id, { expectedRevision: state.revision, patch });
       if (!result.ok) return fail("save", result, sent);
-      reset(values);
-      loadSaved(result.data.blocks, result.data.theme, result.data.appearance);
+      const { needsAttention: issues } = result.data;
+      if (issues) {
+        // Kept exactly as typed: nothing is reloaded, and the form's own problems stay on their fields.
+        reset(values, { keepErrors: true, keepIsSubmitted: true });
+        blocks.markSaved(sent);
+        appearance.markSaved();
+        showProblems(issues, sent);
+        // Lead to the first problem as a refused publish would: the header's section, else the block's own field.
+        if (headerProblems) show("profile");
+        else blocks.revealProblems();
+      } else {
+        reset(values);
+        loadSaved(result.data.blocks, result.data.theme, result.data.appearance);
+      }
+      setNeedsAttention(issues !== null);
+      // What a refused publish reported is now what the saved draft's own state says (or is fixed).
+      setInvalidText(null);
       media.refresh();
       setState((st) => ({ ...st, revision: result.data.revision, hasUnpublishedChanges: true }));
       setOutcome({
         kind: "success",
         op: "save",
-        text: state.isPublished ? "Draft saved. Publish to update your public page." : "Draft saved.",
+        text: issues || !state.isPublished ? "Draft saved." : "Draft saved. Publish to update your public page.",
       });
     });
-  }, headerInvalid("save"));
+  };
+  // Header fields that fail the form's checks are saved as typed, with their messages shown.
+  const save = handleSubmit(
+    (values) => saveWith(values),
+    () => saveWith(getValues(), true),
+  );
 
   const publishWith = (values?: Values) => {
     if (values && !ready("publish")) return;
@@ -402,6 +465,7 @@ export function ProfileEditor({
       if (values) reset(values);
       loadSaved(result.data.blocks, result.data.theme, result.data.appearance);
       media.refresh();
+      setNeedsAttention(false);
       setState({ revision: result.data.revision, isPublished: true, everPublished: true, hasUnpublishedChanges: false });
       setOutcome({ kind: "success", op: "publish", text: "Published. Your public page is up to date." });
     });
@@ -421,9 +485,10 @@ export function ProfileEditor({
     act("discard", async () => {
       const result = await revertDraftAction(profile.id, { expectedRevision: state.revision });
       if (!result.ok) return fail("discard", result);
-      reset(toValues(result.data.draft));
+      reset(toValues(headerOf(result.data.draft)));
       loadSaved(result.data.draft.blocks, result.data.draft.theme, result.data.appearance);
       setInvalidText(null);
+      setNeedsAttention(false);
       setProtectedBlocks(result.data.protectedBlocks);
       media.refresh();
       setState((st) => ({ ...st, revision: result.data.revision, hasUnpublishedChanges: false }));
@@ -439,7 +504,10 @@ export function ProfileEditor({
       const values = getValues();
       const result = await saveDraftAction(profile.id, { expectedRevision: state.revision, patch: toPatch(values, { replaceTheme: presetId }) });
       if (!result.ok) return fail("replace", result);
+      // A replacement is all or nothing: the server never keeps one as an unfinished draft.
+      if (result.data.needsAttention) return;
       loadSaved(null, result.data.theme, result.data.appearance);
+      setNeedsAttention(false);
       media.refresh();
       setState((st) => ({ ...st, revision: result.data.revision, hasUnpublishedChanges: true }));
       setOutcome({ kind: "success", op: "replace", text: "Appearance replaced and draft saved." });
@@ -449,6 +517,7 @@ export function ProfileEditor({
     pending: busy ? op : null,
     outcome,
     invalid: invalidText !== null,
+    needsAttention,
     dirty,
     isPublished: state.isPublished,
     hasUnpublishedChanges: state.hasUnpublishedChanges,
@@ -612,6 +681,7 @@ export function ProfileEditor({
               st={st}
               outcome={outcome}
               invalidText={invalidText}
+              needsAttention={needsAttention}
               dirty={dirty}
               locked={locked}
               protectedBlocks={protectedBlocks}
@@ -861,6 +931,7 @@ function Messages({
   st,
   outcome,
   invalidText,
+  needsAttention,
   dirty,
   locked,
   protectedBlocks,
@@ -872,6 +943,7 @@ function Messages({
   st: EditorStatus;
   outcome: EditorOutcome;
   invalidText: string | null;
+  needsAttention: boolean;
   dirty: boolean;
   locked: boolean;
   protectedBlocks: number;
@@ -881,7 +953,9 @@ function Messages({
   onRetry: (() => void) | null;
 }) {
   // A later operation's feedback replaces the outcome, but unresolved validation problems stay reported.
-  const error = outcome?.kind === "error" ? outcome : invalidText ? ({ op: "save", text: invalidText } as const) : null;
+  const error = outcome?.kind === "error" ? outcome : invalidText ? ({ op: "publish", reason: "invalid", text: invalidText } as const) : null;
+  // Validation feedback names what didn't happen, so a failed save never reads like a blocked publish.
+  const refused = error?.reason !== "invalid" ? null : error.op === "publish" ? "Not published. " : error.op === "save" ? "Not saved. " : null;
   // A success message describes the last action; once there are new edits, "Unsaved changes" is the state.
   const success = outcome?.kind === "success" && (!dirty || outcome.op === "unpublish") ? outcome.text : "";
   return (
@@ -911,6 +985,16 @@ function Messages({
         </div>
       )}
 
+      {needsAttention && (
+        <div role="note" className={`${banner} border-cl-warn/40 bg-cl-warn-wash`} data-testid="draft-needs-attention">
+          <CircleAlert className="mt-0.5 size-4 text-cl-warn" aria-hidden="true" />
+          <p>
+            <strong className="font-semibold">Your draft is saved, but it can&apos;t be published yet.</strong> Fix the highlighted problems,
+            then publish. Visitors never see an unfinished draft.
+          </p>
+        </div>
+      )}
+
       {/* Always rendered so screen readers announce changes to the live region. */}
       <div role="alert" aria-live="assertive" className={error ? `${banner} border-cl-danger/40 bg-cl-danger-wash` : "sr-only"}>
         {error && (
@@ -918,6 +1002,7 @@ function Messages({
             <CircleAlert className="mt-0.5 size-4 text-cl-danger" aria-hidden="true" />
             <p>
               {st.key === "conflict" && <strong className="font-semibold">Someone or something changed this profile after you opened it. </strong>}
+              {refused && <strong className="font-semibold">{refused}</strong>}
               {error.text}
               {error.op === "unpublish" && " Check the public page before retrying Unpublish from More profile actions."}
               {error.op === "discard" && " Your local edits are still here. Retry Discard draft changes from More profile actions."}

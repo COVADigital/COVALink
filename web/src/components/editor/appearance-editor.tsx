@@ -81,14 +81,17 @@ function switchBackground(
   return { type, ...base, ...(imageUrl ? { imageUrl } : {}), overlayOpacity: bg.overlayOpacity ?? last.overlayOpacity };
 }
 
-export function useAppearance(initialTheme: ThemeConfig, initialInfo: AppearanceInfo) {
+const themeErrors = (fieldErrors: Record<string, string[]>) => Object.fromEntries(Object.entries(fieldErrors).filter(([k]) => k.startsWith("theme.")));
+
+/** `kept` reopens an unfinished draft: its theme as it was sent, with the problems reported when it was saved. */
+export function useAppearance(initialTheme: ThemeConfig, initialInfo: AppearanceInfo, kept?: { theme?: ThemeInput; errors?: Record<string, string[]> }) {
   const editable = (info: AppearanceInfo) => info.status === "editable";
   const [info, setInfo] = useState(initialInfo);
   // Parsed stored theme, shown in the preview while it isn't editable.
   const [stored, setStored] = useState(initialTheme);
-  const [theme, setTheme] = useState<ThemeInput | null>(editable(initialInfo) ? toThemeInput(initialTheme) : null);
-  const [saved, setSaved] = useState(() => serialize(editable(initialInfo) ? toThemeInput(initialTheme) : null));
-  const [serverErrors, setServerErrors] = useState<Record<string, string[]>>({});
+  const [theme, setTheme] = useState<ThemeInput | null>(editable(initialInfo) ? (kept?.theme ?? toThemeInput(initialTheme)) : null);
+  const [saved, setSaved] = useState(() => serialize(theme));
+  const [serverErrors, setServerErrors] = useState<Record<string, string[]>>(() => themeErrors(kept?.errors ?? {}));
   // Color fields whose text isn't a valid hex yet; saving waits for them.
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   // The last chosen background image and overlay, restored when switching back to an image background.
@@ -122,10 +125,19 @@ export function useAppearance(initialTheme: ThemeConfig, initialInfo: Appearance
     previewTheme,
     issues,
     serverErrors,
-    /** Fields that must be fixed before saving (unfinished colors, a missing background image). */
+    /** Fields that must be fixed before publishing (unfinished colors, a missing background image). */
     pending: blocking,
+    /** Fields whose typed text isn't a value yet (a partial color or angle): it can't be saved, even in a draft. */
+    unfinished: pending,
     missingImage,
     dirty: theme !== null && serialize(theme) !== saved,
+    /** After an unfinished draft was saved: the theme sent is the saved one. */
+    markSaved: () => setSaved(serialize(theme)),
+    /** Drops unsaved edits, going back to the theme as last saved. */
+    revert() {
+      setTheme(JSON.parse(saved) as ThemeInput | null);
+      setPending(new Set());
+    },
     /** Replaces everything with a stored theme as the server returned it. */
     load(next: ThemeConfig, nextInfo: AppearanceInfo) {
       const input = editable(nextInfo) ? toThemeInput(next) : null;
@@ -178,7 +190,7 @@ export function useAppearance(initialTheme: ThemeConfig, initialInfo: Appearance
       pendingFocus.current = themeFieldId(path);
     },
     applyServerErrors(fieldErrors: Record<string, string[]>) {
-      setServerErrors(Object.fromEntries(Object.entries(fieldErrors).filter(([k]) => k.startsWith("theme."))));
+      setServerErrors(themeErrors(fieldErrors));
     },
     /** The changed theme to send, or undefined to keep the stored one exactly. */
     toInput(): ThemeInput | undefined {

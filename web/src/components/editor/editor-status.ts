@@ -18,10 +18,13 @@ export interface EditorStatusInput {
   pending: EditorOp | null;
   outcome: EditorOutcome;
   /**
-   * The content failed validation. Separate from the outcome: it stays until
-   * the content changes or is reset, whatever other operation runs meanwhile.
+   * The content failed validation when publishing. Separate from the outcome:
+   * it stays until the content changes or is reset, whatever other operation
+   * runs meanwhile. It blocks Publish only; an unfinished draft can be saved.
    */
   invalid: boolean;
+  /** The saved draft has problems to fix before it can be published. */
+  needsAttention: boolean;
   /** Local edits not yet saved. */
   dirty: boolean;
   isPublished: boolean;
@@ -50,6 +53,7 @@ export interface EditorStatus {
     | "replace-failed"
     | "locked"
     | "unsaved"
+    | "needs-attention"
     | "publish-blocked"
     | "unpublished-changes"
     | "published"
@@ -76,8 +80,9 @@ export function editorStatus(s: EditorStatusInput): EditorStatus {
   const conflict = s.outcome?.kind === "error" && s.outcome.reason === "conflict";
   const publishLabel = upToDate ? "Published" : s.isPublished ? "Publish changes" : "Publish";
   const invalid = s.invalid || (s.outcome?.kind === "error" && s.outcome.reason === "invalid");
-  const canSave = !s.pending && !s.locked && !conflict && !invalid && s.dirty;
-  const canPublish = !s.pending && !s.locked && !conflict && !invalid && !upToDate && !s.themeUnreadable;
+  const canSave = !s.pending && !s.locked && !conflict && s.dirty;
+  // A saved draft that needs attention can only be published together with the edits that fix it.
+  const canPublish = !s.pending && !s.locked && !conflict && !invalid && !upToDate && !s.themeUnreadable && !(s.needsAttention && !s.dirty);
   const base = { canSave, canPublish, publishLabel } as const;
 
   if (s.pending) return { ...base, ...PENDING[s.pending], tone: "neutral", icon: "spinner" };
@@ -85,7 +90,8 @@ export function editorStatus(s: EditorStatusInput): EditorStatus {
   if (s.outcome?.kind === "error") {
     const { reason, op } = s.outcome;
     if (reason === "conflict") return { ...base, key: "conflict", tone: "bad", icon: "alert", label: "Out of date" };
-    if (reason === "invalid") return { ...base, key: "invalid", tone: "bad", icon: "alert", label: "Needs attention" };
+    // A save the server refused is a failed save; "Needs attention" is about publishing.
+    if (reason === "invalid" && op !== "save") return { ...base, key: "invalid", tone: "bad", icon: "alert", label: "Needs attention" };
     if (op === "publish") return { ...base, key: "publish-failed", tone: "bad", icon: "alert", label: "Not published" };
     if (op === "unpublish") return { ...base, key: "unpublish-failed", tone: "bad", icon: "alert", label: "Unpublish failed" };
     if (op === "discard") return { ...base, key: "discard-failed", tone: "bad", icon: "alert", label: "Discard failed" };
@@ -97,6 +103,7 @@ export function editorStatus(s: EditorStatusInput): EditorStatus {
 
   if (s.locked) return { ...base, key: "locked", tone: "warn", icon: "lock", label: "Saving turned off" };
   if (s.dirty) return { ...base, key: "unsaved", tone: "warn", icon: "dot", label: "Unsaved changes" };
+  if (s.needsAttention) return { ...base, key: "needs-attention", tone: "warn", icon: "alert", label: "Saved · needs attention" };
   if (s.themeUnreadable) return { ...base, key: "publish-blocked", tone: "warn", icon: "lock", label: "Publishing turned off" };
   if (s.isPublished && s.hasUnpublishedChanges) {
     return { ...base, key: "unpublished-changes", tone: "neutral", icon: "dot", label: "Unpublished changes" };

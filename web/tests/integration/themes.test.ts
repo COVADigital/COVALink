@@ -238,7 +238,7 @@ describe("stored themes the editor can't carry", () => {
     const exact = (await storedTheme(id)).draft_text;
 
     const saved = await save(alice, id, 0, { header: { displayName: "Alice Renamed", bio: "" } });
-    expect(saved.appearance.status).toBe("invalid");
+    expect(saved.needsAttention ?? saved.appearance.status).toBe("invalid");
     expect((await storedTheme(id)).draft_text).toBe(exact);
     expect((await storedDraft(id)).header).toMatchObject({ displayName: "Alice Renamed" });
 

@@ -27,6 +27,7 @@ import { AppError } from "@/lib/errors";
 import { vcardResponseHeaders } from "@/lib/security/headers";
 import { signUp } from "../support/auth-http";
 import { resetDatabase, testSql } from "../support/db";
+import { expectKeptUnfinished } from "../support/unfinished";
 import { TEST_APP_URL, TEST_SETUP_TOKEN } from "../support/test-env";
 import { parseVCard, unescapeText } from "../support/vcard-parse";
 
@@ -201,7 +202,7 @@ describe("edit, publish and discard", () => {
     expect((await row(profileId)).draft.blocks[0].config).toMatchObject({ items: [{ url: "https://github.com/ana" }, { url: "https://ana.example/" }] });
   });
 
-  it("refuses invalid writes and leaves stored JSON, revisions and timestamps unchanged", async () => {
+  it("never publishes an invalid write: malformed ones are refused outright, invalid content is kept only as an unfinished draft", async () => {
     await save(alice, profileId, 0, [SOC(1), EM(2), PH(3), CT(4), SP(5)]);
     await publish(alice, profileId, 1);
     const before = await rawRow(profileId);
@@ -231,17 +232,29 @@ describe("edit, publish and discard", () => {
       ["client version", { ...SP(5), version: 1 }],
       ["social sent as preserved", { id: ID(1), preserve: true }],
     ];
+    // Nothing the editor sends (unknown keys, a client version, a preserve marker) and text the
+    // database can't store (a NUL): refused even as a draft.
+    const malformed = new Set(["nested extra key", "social extra key", "contact extra key", "spacer extra key", "client version", "social sent as preserved", "subject NUL"]);
+    const listWith = (block: unknown) => [SOC(1), EM(2), PH(3), CT(4), SP(5)].map((b) => (b.id === (block as { id: string }).id ? block : b));
     for (const [label, block] of bad) {
-      const list = [SOC(1), EM(2), PH(3), CT(4), SP(5)].map((b) => (b.id === (block as { id: string }).id ? block : b));
-      expect(await code(save(alice, profileId, 1, list)), label).toBe("VALIDATION");
-      expect(await code(publish(alice, profileId, 1, list)), `${label} (publish)`).toBe("VALIDATION");
+      if (malformed.has(label)) expect(await code(save(alice, profileId, 1, listWith(block))), label).toBe("VALIDATION");
+      expect(await code(publish(alice, profileId, 1, listWith(block))), `${label} (publish)`).toBe("VALIDATION");
     }
     expect(await rawRow(profileId)).toEqual(before);
+
+    let revision = 1;
+    for (const [label, block] of bad.filter(([l]) => !malformed.has(l))) {
+      const kept = await save(alice, profileId, revision, listWith(block));
+      expect(kept.needsAttention?.blockErrors?.items, label).toHaveLength(1);
+      revision = kept.revision;
+      await expectKeptUnfinished(profileId, before, label);
+      expect(await code(publish(alice, profileId, revision)), `${label} (publish as saved)`).toBe("VALIDATION");
+    }
   });
 
-  it("maps social item errors to items.{i}.url on the AppError", async () => {
-    const err = await save(alice, profileId, 0, [SOC(1, { items: [{ platform: "github", url: "https://github.com/ok" }, { platform: "x", url: "http://x.com/a" }] })]).catch((e: unknown) => e);
-    expect((err as AppError).blockErrors).toEqual({
+  it("maps social item errors to items.{i}.url", async () => {
+    const saved = await save(alice, profileId, 0, [SOC(1, { items: [{ platform: "github", url: "https://github.com/ok" }, { platform: "x", url: "http://x.com/a" }] })]);
+    expect(saved.needsAttention?.blockErrors).toEqual({
       list: [],
       items: [{ index: 0, id: ID(1), fields: { "items.1.url": ["Enter an https:// X address, like https://x.com/you"] } }],
     });

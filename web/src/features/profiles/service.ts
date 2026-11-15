@@ -6,14 +6,22 @@ import { profiles, users } from "@/db/schema";
 import { getSetting } from "@/features/settings/service";
 import { AppError, isUniqueViolation } from "@/lib/errors";
 import { assessStoredBlocks, resolveBlockList, type ImageMediaLookup } from "@/features/blocks/input";
-import { AVATAR_PATH, BACKGROUND_PATH } from "@/features/media/references";
+import { AVATAR_PATH, BACKGROUND_PATH, imageBlockAt } from "@/features/media/references";
 import { assertExternalAvatar, assertMediaReferences, lockImageSizes, type ReferenceScope } from "@/features/media/service";
 import { contrastFieldErrors, themeContrastIssues } from "@/features/themes/contrast";
-import { themeInputSchema } from "@/features/themes/schema";
+import { draftThemeSchema, themeInputSchema } from "@/features/themes/schema";
 import { assessStoredTheme, canonicalTheme, DEFAULT_THEME, presetTheme, type StoredTheme } from "@/features/themes/theme";
 import { createDefaultDocument, profileDocumentSchema, readDocument, type ProfileDocument } from "./document";
 import { handleSchema } from "./handle";
-import { draftPatchSchema, revisionSchema, type DraftPatch } from "./draft-input";
+import {
+  draftPatchSchema,
+  incompleteDraftSchema,
+  revisionSchema,
+  savablePatchSchema,
+  type DraftPatch,
+  type IncompleteDraft,
+  type SavablePatch,
+} from "./draft-input";
 
 /**
  * All dashboard profile reads/writes go through this module. Every function
@@ -38,7 +46,7 @@ export const updateProfileMetaInput = z
   })
   .strict();
 
-const saveDraftInput = z.object({ expectedRevision: revisionSchema, patch: draftPatchSchema }).strict();
+const saveDraftInput = z.object({ expectedRevision: revisionSchema, patch: savablePatchSchema }).strict();
 const publishInput = z.object({ expectedRevision: revisionSchema, patch: draftPatchSchema.optional() }).strict();
 const revertInput = z.object({ expectedRevision: revisionSchema }).strict();
 
@@ -115,6 +123,11 @@ export async function getOwnedProfile(ownerId: string, profileId: string) {
      * the draft can't be saved or published.
      */
     protectedBlocks,
+    /**
+     * The unfinished draft the owner saved, if any: the editor opens it in
+     * place of `draft`, and the profile can't be published until it validates.
+     */
+    incomplete: readIncomplete(row.draft),
     /**
      * Whether the appearance editor can change the stored draft theme:
      * `editable`, `locked` (valid but not round-trippable) or `invalid`
@@ -194,8 +207,82 @@ const THEME_LOCKED_MESSAGE =
 const THEME_UNREADABLE_MESSAGE =
   "Your saved appearance can't be read, so this profile can't be published. Replace the saved appearance first.";
 const CONTRAST_MESSAGE = "This appearance doesn't have enough contrast to publish. Fix the highlighted colors, then try again.";
+const INCOMPLETE_MESSAGE = "This draft has problems that must be fixed before it can be published.";
+const INCOMPLETE_TOO_LARGE = "This draft is too large to save until its problems are fixed.";
+// An unfinished draft isn't bounded field by field like a valid one, so the whole of it is.
+const MAX_INCOMPLETE_CHARS = 200_000;
+// In `JSON.stringify` output: an escaped NUL or lone surrogate (a real backslash-u typed as text is `\\u…`).
+const UNSTORABLE_TEXT = /(?<!\\)(?:\\\\)*\\u(?:0000|d[89a-f][0-9a-f]{2})/i;
 
 const asObject = (v: unknown) => (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+
+/** The unfinished draft kept beside the stored draft, or null (also when it can't be read). */
+function readIncomplete(storedDraft: unknown): IncompleteDraft | null {
+  const r = incompleteDraftSchema.safeParse(asObject(storedDraft).incomplete);
+  return r.success ? r.data : null;
+}
+
+/**
+ * A patch leaves out the blocks or the theme it didn't change. While the
+ * draft is unfinished, those are the kept ones, not the last valid ones, so
+ * an unfinished part is never dropped or published by leaving it out.
+ */
+function withKept<P extends { blocks?: unknown[]; theme?: unknown; replaceTheme?: unknown }>(patch: P, kept: IncompleteDraft | null): P {
+  if (!kept) return patch;
+  return { ...patch, blocks: patch.blocks ?? kept.blocks, theme: patch.theme ?? (patch.replaceTheme === undefined ? kept.theme : undefined) };
+}
+
+/**
+ * The unfinished draft to keep for a patch that failed validation with `err`,
+ * which is thrown again when the patch can't be kept either. Kept beside
+ * the stored draft, it changes nothing there, so the refusals that protect
+ * stored data stay as they are: a draft holding blocks this version can't
+ * rewrite, a theme the editor can't carry and a confirmed theme replacement
+ * are never written this way. Only what the editor's forms produce is kept:
+ * not a block list or theme of another shape, and not an uploaded image that
+ * isn't the owner's, of the right kind, wherever it is referred to (the rows
+ * are locked like a valid save's, so a deletion can't leave it dangling).
+ */
+async function keepIncomplete(
+  tx: Tx,
+  ownerId: string,
+  storedDraft: unknown,
+  storedPublished: unknown,
+  patch: SavablePatch,
+  images: ImageMediaLookup,
+  err: unknown,
+): Promise<IncompleteDraft> {
+  if (!(err instanceof AppError) || err.code !== "VALIDATION" || patch.replaceTheme !== undefined) throw err;
+  if (URL.canParse(patch.header.avatarUrl ?? "")) assertExternalAvatar(patch.header.avatarUrl);
+  const stored = refuseProtected(storedDraft, storedPublished);
+  const blocks = patch.blocks === undefined ? undefined : resolveBlockList(patch.blocks, stored, images);
+  if (blocks && !blocks.draft) throw err;
+  let theme: IncompleteDraft["theme"];
+  if (patch.theme !== undefined) {
+    const t = draftThemeSchema.safeParse(patch.theme);
+    if (!t.success || assessStoredTheme(asObject(storedDraft).theme).status !== "editable") throw err;
+    theme = t.data;
+  }
+  const blockErrors = blocks && !blocks.ok ? blocks.errors : err.blockErrors;
+  const incomplete: IncompleteDraft = {
+    header: patch.header,
+    seo: patch.seo,
+    ...(blocks ? { blocks: blocks.draft } : {}),
+    ...(theme ? { theme } : {}),
+    issues: {
+      message: err.message,
+      ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}),
+      ...(blockErrors ? { blockErrors } : {}),
+    },
+  };
+  const json = JSON.stringify(incomplete);
+  // Text the JSON column can't hold (a NUL, half of a surrogate pair) is refused with its own message, not kept.
+  if (UNSTORABLE_TEXT.test(json)) throw err;
+  if (json.length > MAX_INCOMPLETE_CHARS) throw new AppError(INCOMPLETE_TOO_LARGE, "VALIDATION");
+  // Image blocks were checked against the locked rows by `resolveBlockList`; they have no stamped size to compare.
+  await assertMediaReferences(tx, ownerId, incomplete, (ref) => !imageBlockAt(ref.path, incomplete));
+  return incomplete;
+}
 
 /**
  * `doc` is the validated, parsed view (returned to the editor); `write` is
@@ -265,7 +352,9 @@ function parseDocument(draft: Record<string, unknown>, theme: StoredTheme, failu
  * stamped with the sizes in `images`.
  */
 function mergePatch(storedDraft: unknown, storedPublished: unknown, patch: DraftPatch, images: ImageMediaLookup): MergedDraft {
-  const raw = asObject(storedDraft);
+  // A patch that validates replaces any unfinished draft kept beside the stored one.
+  const raw = { ...asObject(storedDraft) };
+  delete raw.incomplete;
   const settings = asObject(raw.settings);
   const stored = refuseProtected(storedDraft, storedPublished);
 
@@ -297,6 +386,8 @@ function mergePatch(storedDraft: unknown, storedPublished: unknown, patch: Draft
 function storedDocument(storedDraft: unknown): MergedDraft {
   refuseProtected(storedDraft, undefined);
   const raw = asObject(storedDraft);
+  // Fail closed: a readable unfinished draft is validated as a patch by the caller, so this one is unreadable.
+  if ("incomplete" in raw) throw new AppError(INCOMPLETE_MESSAGE, "VALIDATION");
   const theme = assessStoredTheme(raw.theme);
   const doc = parseDocument(raw, theme, "This profile's saved content is invalid and can't be published.");
   return { doc, write: raw as unknown as ProfileDocument, theme };
@@ -330,26 +421,44 @@ function touchedMedia(patch: DraftPatch): ReferenceScope {
 }
 
 /** The `src` of every image block a patch submits (stamped from the locked rows). */
-function imageSources(patch: DraftPatch | undefined): string[] {
+function imageSources(patch: { blocks?: unknown[] } | undefined): string[] {
   return (patch?.blocks ?? []).flatMap((entry) => {
     const e = entry as { type?: unknown; config?: { src?: unknown } } | null;
     return e && e.type === "image" && typeof e.config?.src === "string" ? [e.config.src] : [];
   });
 }
 
+/**
+ * Saves a draft. A patch that passes everything publishing would check of it
+ * is merged into the stored draft as before (`needsAttention: null`). One
+ * that doesn't is kept as sent beside the stored draft, which stays exactly
+ * as it was, and `needsAttention` says why; `publishProfile` refuses it until
+ * it validates. Saving never touches the published snapshot.
+ */
 export async function saveDraft(ownerId: string, profileId: string, input: unknown) {
-  const { expectedRevision, patch } = parseOrThrow(saveDraftInput, input);
-  assertExternalAvatar(patch.header.avatarUrl);
+  const { expectedRevision, patch: sent } = parseOrThrow(saveDraftInput, input);
   return db.transaction(async (tx) => {
     const row = await lockOwned(tx, ownerId, profileId);
     assertRevision(row.draftRevision, expectedRevision);
-    const images = await lockImageSizes(tx, ownerId, imageSources(patch));
-    const { doc, write, theme } = mergePatch(row.draft, row.published, patch, images);
-    await assertMediaReferences(tx, ownerId, write, touchedMedia(patch));
+    const submitted = withKept(sent, readIncomplete(row.draft));
+    const images = await lockImageSizes(tx, ownerId, imageSources(submitted));
     const revision = row.draftRevision + 1;
     const savedAt = new Date();
-    await tx.update(profiles).set({ draft: write, draftRevision: revision, draftUpdatedAt: savedAt }).where(eq(profiles.id, row.id));
-    return { revision, savedAt, blocks: doc.blocks, theme: doc.theme, appearance: appearanceOf(theme) };
+    const store = (draft: ProfileDocument) =>
+      tx.update(profiles).set({ draft, draftRevision: revision, draftUpdatedAt: savedAt }).where(eq(profiles.id, row.id));
+    let merged: MergedDraft;
+    try {
+      const patch = parseOrThrow(draftPatchSchema, submitted);
+      assertExternalAvatar(patch.header.avatarUrl);
+      merged = mergePatch(row.draft, row.published, patch, images);
+      await assertMediaReferences(tx, ownerId, merged.write, touchedMedia(patch));
+    } catch (err) {
+      const incomplete = await keepIncomplete(tx, ownerId, row.draft, row.published, submitted, images, err);
+      await store({ ...asObject(row.draft), incomplete } as unknown as ProfileDocument);
+      return { revision, savedAt, needsAttention: incomplete.issues };
+    }
+    await store(merged.write);
+    return { revision, savedAt, blocks: merged.doc.blocks, theme: merged.doc.theme, appearance: appearanceOf(merged.theme), needsAttention: null };
   });
 }
 
@@ -360,14 +469,22 @@ export async function saveDraft(ownerId: string, profileId: string, input: unkno
  * failure (including an unreadable theme or a failed contrast check) rolls
  * back both the draft and the published snapshot. Every uploaded image the
  * published document references must be the owner's, of the right kind and,
- * in an image block, of the stored size.
+ * in an image block, of the stored size. An unfinished draft is published only
+ * by passing the same validation as a sent patch: its kept parts stand in for
+ * whatever the patch leaves out, and without a patch it is the patch.
  */
 export async function publishProfile(ownerId: string, profileId: string, input: unknown) {
-  const { expectedRevision, patch } = parseOrThrow(publishInput, input);
-  if (patch) assertExternalAvatar(patch.header.avatarUrl);
+  const { expectedRevision, patch: sent } = parseOrThrow(publishInput, input);
   return db.transaction(async (tx) => {
     const row = await lockOwned(tx, ownerId, profileId);
     assertRevision(row.draftRevision, expectedRevision);
+    const kept = readIncomplete(row.draft);
+    const patch = sent
+      ? withKept(sent, kept)
+      : kept
+        ? parseOrThrow(draftPatchSchema, { header: kept.header, seo: kept.seo, blocks: kept.blocks, theme: kept.theme })
+        : undefined;
+    if (patch) assertExternalAvatar(patch.header.avatarUrl);
     const merged = patch
       ? mergePatch(row.draft, row.published, patch, await lockImageSizes(tx, ownerId, imageSources(patch)))
       : storedDocument(row.draft);

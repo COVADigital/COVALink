@@ -144,9 +144,9 @@ test("desktop: focused shell, three sections and save/publish states", async ({ 
   await expect(page.getByRole("tab", { name: /Profile/ })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("#header-form #displayName")).toBeFocused();
   await expect(topStatus(page)).toHaveText("Needs attention");
-  await expect(page.getByRole("button", { name: "Save draft", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save draft", exact: true })).toBeEnabled(); // an unfinished draft can still be saved
   await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
-  await expect(page.getByRole("alert").filter({ hasText: "Some profile details need attention" })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "Some profile details need attention" })).toContainText("Not published.");
   await page.locator("#header-form #displayName").fill("Fern");
 
   await page.getByRole("button", { name: "Publish", exact: true }).click();
@@ -321,7 +321,7 @@ test.describe("phone", () => {
     // Invalid block: on phones the marker is the icon, with its words for screen readers only.
     await expand(card(page, "Shop"));
     await card(page, "Shop").getByLabel("Web address").fill("not a url");
-    await bar.getByRole("button", { name: "Save draft" }).click();
+    await bar.getByRole("button", { name: /^Publish/ }).click(); // refused before anything is sent, so nothing is stored
     const marker = card(page, "Shop").getByText("Needs attention");
     await expect(marker).toHaveClass(/sr-only/);
     await expect(topStatus(page)).toHaveText("Needs attention");
@@ -455,7 +455,7 @@ test("failed discard and unpublish have recovery; successful unpublish remains v
   await expect(topStatus(page)).toHaveText("Unsaved changes");
 });
 
-test("invalid content keeps Save and Publish blocked through a failed and a successful Unpublish", async ({ page }) => {
+test("invalid content keeps Publish blocked, and Save available, through a failed and a successful Unpublish", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openEditor(page);
   const save = page.getByRole("button", { name: "Save draft", exact: true });
@@ -469,7 +469,7 @@ test("invalid content keeps Save and Publish blocked through a failed and a succ
   await page.locator("#header-form #displayName").fill("");
   await publish.click();
   await expect(topStatus(page)).toHaveText("Needs attention");
-  await expect(save).toBeDisabled();
+  await expect(save).toBeEnabled();
   await expect(publish).toBeDisabled();
 
   const offline = (route: Parameters<Parameters<Page["route"]>[1]>[0]) =>
@@ -478,7 +478,7 @@ test("invalid content keeps Save and Publish blocked through a failed and a succ
   await page.getByRole("button", { name: "More profile actions" }).click();
   await page.getByRole("menuitem", { name: "Unpublish", exact: true }).click();
   await expect(topStatus(page)).toHaveText("Unpublish failed");
-  await expect(save).toBeDisabled();
+  await expect(save).toBeEnabled();
   await expect(publish).toBeDisabled();
   await page.unroute("**/dashboard/profiles/**", offline);
 
@@ -486,11 +486,11 @@ test("invalid content keeps Save and Publish blocked through a failed and a succ
   await page.getByRole("menuitem", { name: "Unpublish", exact: true }).click();
   await expect(status(page)).toContainText("Unpublished. Your public page is no longer available.");
   await expect(topStatus(page)).toHaveText("Needs attention");
-  await expect(page.getByRole("alert").filter({ hasText: "Some profile details need attention" })).toBeVisible();
-  await expect(save).toBeDisabled();
+  await expect(page.getByRole("alert").filter({ hasText: "Some profile details need attention" })).toContainText("Not published.");
+  await expect(save).toBeEnabled();
   await expect(publish).toBeDisabled();
 
-  // Changing the content lifts the block (a new name, so there is something to save).
+  // Changing the content lifts the block on Publish (a new name, so there is something to save).
   await page.locator("#header-form #displayName").fill("Fern Studio");
   await expect(save).toBeEnabled();
   await expect(publish).toBeEnabled();

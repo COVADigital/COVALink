@@ -28,6 +28,7 @@ import { bootstrapSuperAdmin } from "@/features/setup/service";
 import { AppError } from "@/lib/errors";
 import { signUp } from "../support/auth-http";
 import { resetDatabase, testSql } from "../support/db";
+import { expectKeptUnfinished } from "../support/unfinished";
 import { TEST_SETUP_TOKEN } from "../support/test-env";
 
 let alice: string;
@@ -178,7 +179,7 @@ describe("saving blocks", () => {
     expect((await row(id)).draft.blocks).toEqual([]);
   });
 
-  it("rejects invalid block lists and theme/settings injection without changing anything", async () => {
+  it("rejects malformed block lists and theme/settings injection without changing anything", async () => {
     const id = await createFor(alice, "alice");
     await save(alice, id, 0, [L(1)]);
     const before = await row(id);
@@ -186,11 +187,8 @@ describe("saving blocks", () => {
       [{ ...L(2), version: 2 }],
       [{ ...L(2), extra: true }],
       [{ ...L(2), config: { ...L(2).config, icon: "star" } }],
-      [{ ...L(2), config: { title: "x", url: "javascript:alert(1)" } }],
-      [{ ...L(2), config: { title: "x", url: "//evil.com" } }],
       [{ ...L(2), id: "1" }],
       [L(2), L(2)],
-      [{ id: ID(2), type: "video", visible: true, config: { url: "http://www.youtube.com/watch?v=dQw4w9WgXcQ" } }],
       [{ id: ID(2), type: "html", visible: true, config: { html: "<script>" } }],
       [{ ...H(1) }], // id 1 is a link: type change
       Array.from({ length: 101 }, (_, i) => L(100 + i)),
@@ -201,6 +199,30 @@ describe("saving blocks", () => {
     }
     expect(await code(svc.publishProfile(alice, id, { expectedRevision: 1, patch: { ...header, blocks: [L(1, "")] } }))).toBe("VALIDATION");
     expect(await row(id)).toEqual(before);
+  });
+
+  it("keeps unsafe or invalid block content only as an unfinished draft: never in the valid draft, never published", async () => {
+    const id = await createFor(alice, "alice");
+    await save(alice, id, 0, [L(1)]);
+    await svc.publishProfile(alice, id, { expectedRevision: 1 });
+    const before = await rawRow(id);
+    let revision = 1;
+    for (const block of [
+      { ...L(2), config: { title: "x", url: "javascript:alert(1)" } },
+      { ...L(2), config: { title: "x", url: "//evil.com" } },
+      { id: ID(2), type: "video", visible: true, config: { url: "http://www.youtube.com/watch?v=dQw4w9WgXcQ" } },
+    ]) {
+      expect(await code(svc.publishProfile(alice, id, { expectedRevision: revision, patch: { ...header, blocks: [L(1), block] } }))).toBe("VALIDATION");
+      const kept = await save(alice, id, revision, [L(1), block]);
+      expect(kept.needsAttention?.blockErrors?.items).toEqual([expect.objectContaining({ index: 1, id: ID(2) })]);
+      revision = kept.revision;
+      const stored = await expectKeptUnfinished(id, before);
+      expect(stored.blocks?.[1].config).toEqual(block.config); // exactly as typed, for the editor only
+      expect(await code(svc.publishProfile(alice, id, { expectedRevision: revision }))).toBe("VALIDATION");
+    }
+    const html = (await publicHtml("alice"))!;
+    expect(html).toContain("Link 1");
+    expect(html).not.toMatch(/javascript:|evil\.com|watch\?v=/);
   });
 
   it("carries safe, structured block errors on the AppError", async () => {
@@ -463,15 +485,21 @@ describe("authorization", () => {
 
     session.user = { id: alice, name: "alice", email: "alice@example.com", emailVerified: true, role: "user" };
     const bad = await actions.saveDraftAction(id, { expectedRevision: 0, patch: { ...header, blocks: [{ ...L(1), config: { title: "x", url: "data:text/html,x" } }] } });
+    // Kept as an unfinished draft: the result carries only our own messages, never validator internals.
     expect(bad).toEqual({
-      ok: false,
-      error: "Some blocks need attention.",
-      code: "VALIDATION",
-      fieldErrors: undefined,
-      blockErrors: { list: [], items: [{ index: 0, id: ID(1), fields: { url: ["Enter a valid http(s) address, like example.com"] } }] },
+      ok: true,
+      data: {
+        revision: 1,
+        savedAt: expect.any(String),
+        needsAttention: {
+          message: "Some blocks need attention.",
+          blockErrors: { list: [], items: [{ index: 0, id: ID(1), fields: { url: ["Enter a valid http(s) address, like example.com"] } }] },
+        },
+      },
     });
 
-    const ok = await actions.saveDraftAction(id, input);
-    expect(ok).toMatchObject({ ok: true, data: { revision: 1, blocks: [{ id: ID(1), version: 2 }] } });
+    const ok = await actions.saveDraftAction(id, { ...input, expectedRevision: 1 });
+    expect(ok).toMatchObject({ ok: true, data: { revision: 2, needsAttention: null, blocks: [{ id: ID(1), version: 2 }] } });
+    expect((await row(id)).draft).not.toHaveProperty("incomplete");
   });
 });

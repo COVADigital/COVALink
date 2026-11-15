@@ -73,7 +73,7 @@ export async function updateProfileMetaAction(profileId: string, input: unknown)
 export async function saveDraftAction(profileId: string, input: unknown) {
   return run("saveDraft", async (userId) => {
     const r = await service.saveDraft(userId, profileId, input);
-    return { revision: r.revision, savedAt: r.savedAt.toISOString(), blocks: r.blocks, theme: r.theme, appearance: r.appearance };
+    return { ...r, savedAt: r.savedAt.toISOString() };
   });
 }
 

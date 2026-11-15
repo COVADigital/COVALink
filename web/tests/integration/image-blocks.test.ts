@@ -38,6 +38,7 @@ import { bootstrapSuperAdmin } from "@/features/setup/service";
 import { AppError } from "@/lib/errors";
 import { cookieFrom, deleteAccount, signIn, signUp } from "../support/auth-http";
 import { resetDatabase, testSql } from "../support/db";
+import { expectKeptUnfinished } from "../support/unfinished";
 import * as img from "../support/images";
 import { TEST_APP_URL, TEST_SETUP_TOKEN } from "../support/test-env";
 
@@ -174,6 +175,7 @@ describe("save, publish and render", () => {
     expect([a.width, a.height]).toEqual([1200, 700]);
 
     const saved = await save(alice, profileId, 0, [IMG(1, a.url, { caption: "Summer", href: "shop.example.com" }), L(2)]);
+    if (saved.needsAttention) throw new Error("the draft should validate");
     expect(saved.blocks[0]).toMatchObject({ type: "image", version: 2, config: { width: 1200, height: 700, href: "https://shop.example.com/" } });
     const stored = (await row(profileId)).draft.blocks[0];
     expect(stored).toEqual({
@@ -261,12 +263,15 @@ describe("refused writes are atomic", () => {
       ["injected dimensions", IMG(1, a.url, { width: a.width, height: a.height }), null, "This block has fields that aren't supported."],
       ["an injected version", { ...IMG(1, a.url), version: 2 }, null, "This block is malformed."],
     ];
+    // The editor's own form can leave these unfinished; a save keeps them as a draft (below). Everything else is refused.
+    const unfinished = new Set(["missing alt text", "decorative with alt text", "decorative with a link"]);
     const errors: Record<string, unknown> = {};
     for (const [label, block, fields, message] of cases) {
       for (const [op, write] of [
         ["save", () => save(alice, profileId, 1, [block, L(2)])],
         ["publish", () => publish(alice, profileId, 1, [block, L(2)])],
       ] as const) {
+        if (op === "save" && unfinished.has(label)) continue;
         const err = await failure(write());
         expect(err?.code, `${label} (${op})`).toBe("VALIDATION");
         const item = err?.blockErrors?.items[0];
@@ -280,6 +285,15 @@ describe("refused writes are atomic", () => {
     // Another user's image and a missing one are indistinguishable.
     expect(errors["another user's image save"]).toEqual(errors["a missing image save"]);
     expect(errors["another user's image publish"]).toEqual(errors["a missing image publish"]);
+
+    let revision = 1;
+    for (const [label, block, fields] of cases.filter(([l]) => unfinished.has(l))) {
+      const kept = await save(alice, profileId, revision, [block, L(2)]);
+      expect(kept.needsAttention?.blockErrors?.items[0]?.fields, label).toEqual(fields);
+      revision = kept.revision;
+      await expectKeptUnfinished(profileId, before, label);
+      expect((await failure(publish(alice, profileId, revision)))?.code, label).toBe("VALIDATION");
+    }
   });
 
   it("publishing checks every stored reference: another user's image, the wrong kind or a size that doesn't match", async () => {

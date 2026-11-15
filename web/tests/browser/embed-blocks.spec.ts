@@ -106,9 +106,9 @@ test("adds video and music blocks with focus and inline errors; the preview cont
   await expect(field(page, "-url")).toBeFocused();
   await expect(preview(page)).toContainText("Incomplete video");
 
-  // Saving reveals the problem and focuses the field; a refused link gets a specific message.
+  // Saving keeps the unfinished block, reveals the problem and focuses the field; a refused link gets a specific message.
   await page.getByRole("button", { name: "Save draft" }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "Some blocks need attention" })).toBeVisible();
+  await expect(page.getByTestId("draft-needs-attention").filter({ visible: true })).toContainText("saved, but it can't be published yet");
   await expect(field(page, "-url")).toBeFocused();
   await expect(cards(page).first().getByText(/Paste a YouTube or Vimeo link/)).toBeVisible();
   await field(page, "-url").fill(`<iframe src="https://www.youtube.com/embed/${YT_ID}"></iframe>`);

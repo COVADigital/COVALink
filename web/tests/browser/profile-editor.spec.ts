@@ -107,12 +107,12 @@ test("edits update the shared preview live; saving a draft keeps the page unpubl
   await expect(page.locator("#displayName")).toHaveValue("Casey Draft");
 });
 
-test("invalid input is reported inline and nothing is saved", async ({ page }) => {
+test("invalid input is reported inline; publishing it is refused and stores nothing", async ({ page }) => {
   await openEditor(page);
   await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#displayName").fill("");
   await page.locator("#avatarUrl").fill("javascript:alert(1)");
-  await page.getByRole("button", { name: "Save draft" }).click();
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
   await expect(page.locator("#displayName")).toHaveAttribute("aria-invalid", "true");
   await expect(page.locator("#avatarUrl-error")).toHaveText("Use an https:// image address");
   await page.reload();
