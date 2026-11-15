@@ -260,7 +260,7 @@ export function ProfileBlocks({ blocks, ctx }: { blocks: readonly ViewBlock[]; c
   return (
     <div className="pp-blocks">
       {shown.map((block) => (
-        <div key={block.id} className="pp-block" data-block-id={block.id} data-block-type={block.type}>
+        <div key={block.id} className="pp-block" id={`profile-block-${block.id}`} data-block-id={block.id} data-block-type={block.type}>
           {isIncomplete(block) ? (
             <p className="pp-incomplete">Incomplete {BLOCK_DEFINITIONS[block.type].label.toLowerCase()}: finish it in the editor.</p>
           ) : (

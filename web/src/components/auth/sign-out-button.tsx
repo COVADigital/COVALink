@@ -3,9 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { navigateWithGuard } from "@/lib/navigation-guard";
 import { authClient } from "@/lib/auth/client";
 
-export function SignOutButton() {
+/** Signs out and returns to the login page; shared by the header button and the editor's workspace menu. */
+export function useSignOut() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -23,6 +25,11 @@ export function SignOutButton() {
     router.refresh();
   }
 
+  return { signOut: () => navigateWithGuard(() => { void signOut(); }), pending, failed };
+}
+
+export function SignOutButton() {
+  const { signOut, pending, failed } = useSignOut();
   return (
     <div className="flex items-center gap-2">
       <Button variant="outline" onClick={signOut} disabled={pending}>

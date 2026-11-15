@@ -64,8 +64,8 @@ const presetLabel = (page: Page, id: string) => page.locator("label").filter({ h
 const field = (page: Page, label: string) => page.getByLabel(label, { exact: true }).filter({ visible: true });
 
 async function appearanceTab(page: Page) {
-  await page.getByRole("tab", { name: /Appearance/ }).click();
-  await expect(page.getByRole("tab", { name: /Appearance/ })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: /Design/ }).click();
+  await expect(page.getByRole("tab", { name: /Design/ })).toHaveAttribute("aria-selected", "true");
 }
 
 async function saveDraft(page: Page) {
@@ -219,8 +219,8 @@ test("keyboard: the tabs, preset radios and reset work from the keyboard with vi
   await openEditor(page);
   await page.getByRole("tab", { name: "Content" }).focus();
   await page.keyboard.press("ArrowRight");
-  await expect(page.getByRole("tab", { name: /Appearance/ })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("tab", { name: /Appearance/ })).toBeFocused();
+  await expect(page.getByRole("tab", { name: /Design/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: /Design/ })).toBeFocused();
 
   const neon = page.getByTestId("preset-neon");
   await neon.focus();
@@ -259,14 +259,14 @@ test("warns about low contrast, saves the draft, but the server refuses to publi
   await expect(warning).toContainText("Text contrast is 1.00:1 against the background; it needs at least 4.5:1.");
   await expect(field(page, "Text")).toHaveAttribute("aria-describedby", /theme-text-color-contrast/);
   await expect(page.getByTestId("contrast-summary")).toContainText("can't be published");
-  await expect(page.getByRole("tab", { name: /Appearance/ }).getByRole("img", { name: "needs attention" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Design/ }).getByRole("img", { name: "needs attention" })).toBeVisible();
 
   await saveDraft(page);
   await page.getByRole("tab", { name: "Content" }).click();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "doesn't have enough contrast to publish" })).toBeVisible();
   // The editor switches to the problem and focuses it; the server's message is on the field.
-  await expect(page.getByRole("tab", { name: /Appearance/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: /Design/ })).toHaveAttribute("aria-selected", "true");
   await expect(field(page, "Text")).toBeFocused();
   await expect(page.locator("#theme-text-color-error")).toContainText("needs at least 4.5:1");
   // The same problem is shown once: the server's error replaces the identical live warning.
@@ -355,7 +355,8 @@ test("draft appearance stays private, discard restores the published one, and a 
   expect((await themedStyles(visitor.locator(".pp-root"))).accent).toBe("#9a3412"); // editorial, as published
   await visitor.close();
 
-  await page.getByRole("button", { name: "Discard draft changes" }).click();
+  await page.getByRole("button", { name: "More profile actions" }).click();
+  await page.getByRole("menuitem", { name: "Discard draft changes" }).click();
   await page.getByRole("button", { name: "Discard changes" }).click();
   await expect(status(page)).toContainText("Draft changes discarded");
   await expect(field(page, "Accent")).toHaveValue("#9a3412");
@@ -416,7 +417,7 @@ test("stored themes the editor can't carry are read-only until replaced after co
 
   // Replacement waits for other changes, then asks for confirmation.
   const replace = page.getByRole("button", { name: "Replace saved appearance" });
-  await page.getByRole("tab", { name: "Content" }).click();
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#bio").fill("Unsaved bio");
   await appearanceTab(page);
   await expect(replace).toBeDisabled();
@@ -444,6 +445,7 @@ test("stored themes the editor can't carry are read-only until replaced after co
   await openEditor(page, url);
   await expect(page.getByTestId("publish-blocked").filter({ visible: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#bio").fill("Still editable");
   await saveDraft(page);
   await appearanceTab(page);

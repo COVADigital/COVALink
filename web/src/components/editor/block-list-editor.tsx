@@ -12,11 +12,30 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowDown, ArrowUp, ChevronDown, Copy, EyeOff, GripVertical, Plus, Trash } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowDownToLine,
+  ArrowUp,
+  ArrowUpToLine,
+  ChevronDown,
+  CircleAlert,
+  Copy,
+  Eye,
+  EyeOff,
+  GripVertical,
+  MoreHorizontal,
+  Plus,
+  Trash,
+} from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import type { Block } from "@/features/blocks/block";
 import { BLOCK_DEFINITIONS, EDITABLE_BLOCK_TYPES, MAX_SOCIAL_ITEMS, type EditableBlockType } from "@/features/blocks/definitions";
@@ -64,6 +83,8 @@ export function useBlockList(initial: readonly Block[]) {
   const [submitted, setSubmitted] = useState(false);
   const [server, setServer] = useState<{ list: string[]; byId: Record<string, ItemErrors> }>({ list: [], byId: {} });
   const [announcement, setAnnouncement] = useState("");
+  // The block being worked on; the editor marks it in the preview.
+  const [selected, setSelected] = useState<string | null>(null);
   const pendingFocus = useRef<string[] | null>(null);
 
   // Runs after every commit: move focus once the element it targets exists.
@@ -116,6 +137,8 @@ export function useBlockList(initial: readonly Block[]) {
     viewBlocks,
     dirty,
     announcement,
+    selected,
+    select: (id: string) => setSelected(id),
     /** Uploaded images chosen in image blocks, saved or not. */
     images,
     listErrors: server.list,
@@ -167,6 +190,7 @@ export function useBlockList(initial: readonly Block[]) {
       const item = createItem(type);
       setItems((xs) => [...xs, item]);
       expand([item.id]);
+      setSelected(item.id);
       setAnnouncement(`Added a ${BLOCK_DEFINITIONS[type].label.toLowerCase()} block at the end.`);
       focus(blockFieldId(item.id, FIRST_FIELD[type]));
     },
@@ -226,10 +250,12 @@ export function useBlockList(initial: readonly Block[]) {
         if (!next.delete(id)) next.add(id);
         return next;
       });
+      setSelected(id);
     },
 
     /** Moves a block and announces it; focus stays on the control used, or the other one at an edge. */
-    move(from: number, to: number, via: "up" | "down" | "drag") {
+    /** "menu": focus returns to the row's ⋯ trigger, which moves with the block. */
+    move(from: number, to: number, via: "up" | "down" | "drag" | "menu") {
       if (to < 0 || to >= items.length || from === to) return;
       const item = items[from];
       setItems(moveItem(items, from, to));
@@ -282,23 +308,39 @@ function SortableBlock({
   const isOpen = list.expanded.has(item.id);
   const errors = list.errorsFor(item);
   const headingId = `blk-${item.id}-heading`;
+  const selected = list.selected === item.id;
+  const visibleId = blockFieldId(item.id, "visible");
 
   return (
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className="rounded-lg border bg-background data-[dragging=true]:z-10 data-[dragging=true]:shadow-lg"
+      // Focus anywhere in the row selects it, so keyboard users get the linked preview mark too.
+      onFocus={() => list.select(item.id)}
+      className={[
+        "rounded-cl-md",
+        item.visible ? "bg-cl-surface" : "border-dashed bg-cl-canvas",
+        // Selection is never colour alone: the open panel and the "Editing" label go with it.
+        errors.attention ? "-m-px border-2 border-cl-danger" : selected ? "-m-px border-2 border-cl-accent" : item.visible ? "border border-cl-line" : "border border-cl-line-strong",
+        "data-[dragging=true]:z-10 data-[dragging=true]:border-dashed data-[dragging=true]:border-cl-ink data-[dragging=true]:shadow-lg",
+      ].join(" ")}
       data-dragging={isDragging || undefined}
+      data-selected={selected || undefined}
       data-testid="block-card"
       data-block-id={item.id}
       data-block-type={item.type}
       aria-labelledby={headingId}
+      aria-current={selected ? "true" : undefined}
+      aria-details={selected && item.visible ? `profile-block-${item.id}` : undefined}
+      aria-describedby={selected ? `blk-${item.id}-selection` : undefined}
     >
-      <div className="flex items-center gap-1 p-1.5">
+      {selected && <span id={`blk-${item.id}-selection`} className="sr-only" role="status">Selected block: {label}. {item.visible ? "Matching block highlighted in the draft preview." : "Hidden from the draft preview."}</span>}
+      <div className="flex items-center gap-1 p-1">
         <button
           ref={setActivatorNodeRef}
           type="button"
-          className="inline-flex size-8 shrink-0 cursor-grab max-sm:size-11 touch-none items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex size-10 shrink-0 cursor-grab touch-none items-center justify-center rounded-cl-sm text-cl-ink-2 outline-none max-ed-lg:size-11 hover:bg-cl-inset hover:text-cl-ink focus-visible:ring-2 focus-visible:ring-cl-accent disabled:cursor-not-allowed disabled:opacity-50 data-[dragging=true]:bg-cl-ink data-[dragging=true]:text-cl-surface"
+          data-dragging={isDragging || undefined}
           aria-label={`Drag to reorder “${label}”`}
           disabled={disabled}
           data-testid="block-drag-handle"
@@ -311,42 +353,57 @@ function SortableBlock({
         <button
           id={ctrlId(item.id, "toggle")}
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left max-sm:min-h-11 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-cl-sm px-1.5 py-1 text-left outline-none max-ed-lg:min-h-11 hover:bg-cl-inset focus-visible:ring-2 focus-visible:ring-cl-accent"
           aria-expanded={isOpen}
           aria-controls={ctrlId(item.id, "panel")}
           onClick={() => list.toggleExpanded(item.id)}
         >
-          <ChevronDown className={`size-4 shrink-0 transition-transform ${isOpen ? "" : "-rotate-90"}`} aria-hidden="true" />
+          <ChevronDown className={`size-4 shrink-0 text-cl-ink-2 motion-safe:transition-transform ${isOpen ? "" : "-rotate-90"}`} aria-hidden="true" />
           <span id={headingId} className="grid min-w-0">
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-cl-ink-2">
               <span className="sr-only">Edit </span>
               {typeLabel}
             </span>
-            <span className="truncate text-sm font-medium" data-testid="block-label">
+            <span className="truncate text-sm font-semibold" data-testid="block-label">
               {label}
             </span>
           </span>
         </button>
 
         <div className="flex shrink-0 items-center gap-0.5">
-          {errors.attention && (
-            <Badge variant="destructive" className="hidden sm:inline-flex">
-              Needs attention
-            </Badge>
+          {errors.attention ? (
+            // Phone: the icon alone (shortened); the red border and the field errors carry the detail.
+            <span className="inline-flex items-center gap-1 rounded-cl-sm border border-cl-danger px-1.5 py-0.5 text-xs font-semibold text-cl-danger">
+              <CircleAlert className="size-3.5" aria-hidden="true" />
+              <span className="max-ed-md:sr-only">Needs attention</span>
+            </span>
+          ) : (
+            selected &&
+            isOpen && (
+              <span className="rounded-cl-sm border border-cl-line-strong px-1.5 py-0.5 text-xs font-semibold text-cl-ink-2 max-ed-md:hidden">Editing</span>
+            )
           )}
-          {!item.visible && (
-            <Badge variant="secondary" className="gap-1" data-testid="block-hidden-badge">
-              <EyeOff className="size-3" aria-hidden="true" />
-              <span className="hidden sm:inline">Hidden</span>
-              <span className="sr-only sm:hidden">Hidden</span>
-            </Badge>
-          )}
+          <label
+            htmlFor={visibleId}
+            className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-cl-sm px-1.5 text-xs font-semibold text-cl-ink-2 max-ed-lg:min-h-11 hover:bg-cl-inset"
+          >
+            <Switch
+              id={visibleId}
+              checked={item.visible}
+              disabled={disabled}
+              aria-label={`Show “${label}” on page`}
+              onCheckedChange={(v) => list.setVisible(item.id, v)}
+            />
+            <span aria-hidden="true" data-testid={item.visible ? undefined : "block-hidden-badge"}>
+              {item.visible ? "Shown" : "Hidden"}
+            </span>
+          </label>
           <Button
             id={ctrlId(item.id, "up")}
             type="button"
             variant="ghost"
             size="icon"
-            className={TOUCH_ICON}
+            className={`${TOUCH_ICON} max-ed-md:hidden`}
             aria-label={`Move “${label}” up`}
             disabled={disabled || index === 0}
             onClick={() => list.move(index, index - 1, "up")}
@@ -358,13 +415,14 @@ function SortableBlock({
             type="button"
             variant="ghost"
             size="icon"
-            className={TOUCH_ICON}
+            className={`${TOUCH_ICON} max-ed-md:hidden`}
             aria-label={`Move “${label}” down`}
             disabled={disabled || index === count - 1}
             onClick={() => list.move(index, index + 1, "down")}
           >
             <ArrowDown aria-hidden="true" />
           </Button>
+          <BlockMenu item={item} index={index} count={count} list={list} disabled={disabled} />
         </div>
       </div>
 
@@ -372,6 +430,80 @@ function SortableBlock({
         <BlockPanel item={item} index={index} list={list} disabled={disabled} message={errors.message} fields={errors.fields} media={media} />
       )}
     </li>
+  );
+}
+
+/**
+ * Row actions. Move up / Move down are also visible buttons from 45rem;
+ * on phones this menu is where they live. Focus returns to the trigger, which
+ * moves with its block, and every move is announced.
+ */
+function BlockMenu({ item, index, count, list, disabled }: { item: EditableItem; index: number; count: number; list: BlockListState; disabled: boolean }) {
+  const label = itemLabel(item);
+  const row = "min-h-11 ed-lg:min-h-9";
+  // Duplicate and Delete move focus themselves (to the copy, or the next block); the menu mustn't take it back.
+  const ownFocus = useRef(false);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="ghost" size="icon" className="size-10 max-ed-lg:size-11" aria-label={`More actions for “${label}”`} disabled={disabled}>
+          <MoreHorizontal aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="min-w-52"
+        onCloseAutoFocus={(e) => {
+          if (ownFocus.current) e.preventDefault();
+          ownFocus.current = false;
+        }}
+      >
+        <DropdownMenuItem className={row} disabled={index === 0} onSelect={() => list.move(index, index - 1, "menu")}>
+          <ArrowUp aria-hidden="true" />
+          Move up
+        </DropdownMenuItem>
+        <DropdownMenuItem className={row} disabled={index === count - 1} onSelect={() => list.move(index, index + 1, "menu")}>
+          <ArrowDown aria-hidden="true" />
+          Move down
+        </DropdownMenuItem>
+        <DropdownMenuItem className={row} disabled={index === 0} onSelect={() => list.move(index, 0, "menu")}>
+          <ArrowUpToLine aria-hidden="true" />
+          Move to top
+        </DropdownMenuItem>
+        <DropdownMenuItem className={row} disabled={index === count - 1} onSelect={() => list.move(index, count - 1, "menu")}>
+          <ArrowDownToLine aria-hidden="true" />
+          Move to bottom
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className={row}
+          disabled={list.items.length >= MAX_BLOCKS}
+          onSelect={() => {
+            ownFocus.current = true;
+            list.duplicate(index);
+          }}
+        >
+          <Copy aria-hidden="true" />
+          Duplicate
+        </DropdownMenuItem>
+        <DropdownMenuItem className={row} onSelect={() => list.setVisible(item.id, !item.visible)}>
+          {item.visible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+          {item.visible ? "Hide from page" : "Show on page"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className={row}
+          variant="destructive"
+          onSelect={() => {
+            ownFocus.current = true;
+            list.remove(index);
+          }}
+        >
+          <Trash aria-hidden="true" />
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -394,9 +526,8 @@ function BlockPanel({
 }) {
   const Editor = BLOCK_EDITORS[item.type];
   const label = itemLabel(item);
-  const visibleId = blockFieldId(item.id, "visible");
   return (
-    <div id={ctrlId(item.id, "panel")} className="grid gap-4 border-t p-4">
+    <div id={ctrlId(item.id, "panel")} className="grid gap-4 border-t border-cl-line p-4 ed-md:pl-12">
       {message && (
         <p className="text-sm text-destructive" data-testid="block-error">
           {message}
@@ -413,11 +544,7 @@ function BlockPanel({
           media={media}
         />
       </fieldset>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Switch id={visibleId} className="max-sm:after:-inset-y-[13px]" checked={item.visible} disabled={disabled} onCheckedChange={(v) => list.setVisible(item.id, v)} />
-          <Label htmlFor={visibleId}>Show on page</Label>
-        </div>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="flex gap-1">
           <Button
             type="button"

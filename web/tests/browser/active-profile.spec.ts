@@ -184,7 +184,7 @@ test("a sync still in flight doesn't overwrite a newer switcher choice", async (
   await page.unroute(`**/dashboard/profiles/${shopId}`);
 
   // Opening it again through a link is a new choice.
-  await page.getByRole("link", { name: "← All profiles" }).click();
+  await page.getByRole("link", { name: "Back to profiles" }).click();
   await page.getByTestId("profile-row").filter({ visible: true, hasText: "/active-shop" }).getByRole("link", { name: "Edit" }).click();
   await expect(page).toHaveURL(new RegExp(`/dashboard/profiles/${shopId}$`));
   await expect.poll(() => remembered(page.context())).toBe(shopId);
@@ -195,8 +195,11 @@ test.describe("phone viewport", () => {
 
   test("the header shows the opened profile and fits", async ({ page }) => {
     await page.goto(`/dashboard/profiles/${shopId}`);
-    await expect(switcher(page)).toContainText("Shop");
-    await expect(analyticsLink(page)).toHaveAttribute("href", `/dashboard/profiles/${shopId}/analytics`);
+    // Phones: the editor names the opened profile, and its workspace menu links to that profile's analytics.
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Shop");
+    await page.getByRole("button", { name: "Workspace menu" }).click();
+    await expect(page.getByRole("menuitem", { name: "Analytics" })).toHaveAttribute("href", `/dashboard/profiles/${shopId}/analytics`);
+    await page.keyboard.press("Escape");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await expectRemembered(page, shopId, "Shop");
   });

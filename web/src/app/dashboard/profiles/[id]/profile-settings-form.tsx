@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { FormAlert, FormField } from "@/components/auth/form-field";
@@ -19,6 +19,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { updateProfileMetaAction } from "@/features/profiles/actions";
 import { normalizeHandle } from "@/features/profiles/handle";
+
+import { MetadataGuard } from "./profile-editor";
 
 const schema = z.object({
   handle: z.string().trim().min(2, "Handles need at least 2 characters").max(40),
@@ -39,6 +41,12 @@ export function ProfileSettingsForm({ profileId, handle, label }: { profileId: s
     reset,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<Values>({ resolver: zodResolver(schema), defaultValues: { handle, label } });
+
+  const guard = useContext(MetadataGuard);
+  const changed = guard?.changed;
+  const registerReset = guard?.registerReset;
+  useEffect(() => { changed?.(isDirty); }, [changed, isDirty]);
+  useEffect(() => registerReset?.(() => { reset(); setConfirming(null); setSaved(null); setFormError(null); }), [registerReset, reset]);
 
   async function submit(values: Values) {
     setFormError(null);
@@ -62,10 +70,10 @@ export function ProfileSettingsForm({ profileId, handle, label }: { profileId: s
   });
 
   return (
-    <section aria-labelledby="settings-heading" className="rounded-xl border bg-card p-5">
-      <h2 id="settings-heading" className="mb-4 text-sm font-medium">
+    <section aria-labelledby="settings-heading" className="rounded-cl-lg border border-cl-line bg-cl-surface p-4 ed-md:p-5">
+      <h3 id="settings-heading" className="mb-4 text-sm font-semibold">
         Address &amp; name
-      </h2>
+      </h3>
       <form onSubmit={onSubmit} noValidate className="grid gap-4 sm:max-w-md">
         <FormAlert message={formError} />
         <FormField id="settings-handle" label="Handle" spellCheck={false} autoComplete="off" error={errors.handle?.message} {...register("handle")} />

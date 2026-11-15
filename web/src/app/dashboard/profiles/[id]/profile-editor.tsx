@@ -1,16 +1,20 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
-import { useForm, useWatch } from "react-hook-form";
+import { ChartLine, ChevronLeft, CircleAlert, CircleCheck, Dot, Eye, LoaderCircle, Lock, MoreHorizontal, Pencil, RotateCw, SquareArrowOutUpRight } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { createContext, useEffect, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
+import { useForm, useWatch, type FieldErrors } from "react-hook-form";
 import { z } from "zod";
-import { FormAlert, FormField } from "@/components/auth/form-field";
+import { FormField } from "@/components/auth/form-field";
 import { AppearanceEditor, useAppearance, type AppearanceInfo } from "@/components/editor/appearance-editor";
 import { BlockListEditor, useBlockList } from "@/components/editor/block-list-editor";
+import { editorStatus, NETWORK_ERROR, type EditorOp, type EditorOutcome, type EditorStatus } from "@/components/editor/editor-status";
 import { MediaPicker, useMediaLibrary } from "@/components/editor/media-picker";
+import { WorkspaceMenu, type WorkspaceLink } from "@/components/editor/workspace-nav";
 import type { ViewBlock } from "@/components/profile/blocks";
 import { ProfileView, type ViewDocument } from "@/components/profile/profile-view";
-import { ProfileStatusBadge } from "@/components/profile-status-badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,9 +24,15 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -36,6 +46,8 @@ import type { PresetId, ThemeConfig, ThemeInput } from "@/features/themes/schema
 import type { BlockListErrors } from "@/lib/errors";
 import { guardedLink, navigateWithGuard, registerLeaveGuard, type ConfirmLeave } from "@/lib/navigation-guard";
 import { isMediaUrl, parseImageSrc } from "@/lib/validation/media";
+
+export const MetadataGuard = createContext<{ changed: (dirty: boolean) => void; registerReset: (reset: () => void) => () => void } | null>(null);
 
 export interface EditorProfile {
   id: string;
@@ -110,21 +122,45 @@ function previewDocument(base: ProfileDocument, v: Partial<Values>, blocks: View
 
 const noopSubscribe = () => () => {};
 
+const HEADER_INVALID = "Some profile details need attention. Fix the highlighted fields, then try again.";
 const BLOCKS_INVALID = "Some blocks need attention. Fix the highlighted fields, then try again.";
 const APPEARANCE_INVALID = "Some appearance settings need attention. Fix the highlighted fields, then try again.";
 
-type Tab = "content" | "appearance";
+type Tab = "profile" | "content" | "design";
+/** Below 75rem the editor and the preview take turns. */
+type View = "edit" | "preview";
 
-type Status = { kind: "success" | "error"; text: string; conflict?: boolean } | null;
+const card = "grid min-w-0 gap-4 rounded-cl-lg border border-cl-line bg-cl-surface p-4 ed-md:p-5";
+const tabTrigger =
+  "min-h-11 flex-none px-3 text-cl-ink-2 ed-lg:min-h-10 data-active:font-semibold data-active:text-cl-ink max-ed-md:flex-1 group-data-horizontal/tabs:after:bottom-[-1px]";
 
-export function ProfileEditor({ profile }: { profile: EditorProfile }) {
+export function ProfileEditor({
+  profile,
+  label,
+  links,
+  switcher,
+  manage,
+}: {
+  profile: EditorProfile;
+  /** The owner's name for this profile (only they see it). */
+  label: string;
+  links: WorkspaceLink[];
+  /** The active-profile switcher (from 45rem; phones go back to the list), or null with one profile. */
+  switcher: ReactNode;
+  /** Address, name and deletion forms, shown at the end of the Profile section. */
+  manage: ReactNode;
+}) {
   const [state, setState] = useState({
     revision: profile.revision,
     isPublished: profile.isPublished,
     everPublished: profile.everPublished,
     hasUnpublishedChanges: profile.hasUnpublishedChanges,
   });
-  const [status, setStatus] = useState<Status>(null);
+  const [outcome, setOutcome] = useState<EditorOutcome>(null);
+  // Why the content failed validation. Unlike the outcome, other operations (Unpublish) don't clear it:
+  // only changed, reset or successfully saved content does, so Save and Publish stay blocked until then.
+  const [invalidText, setInvalidText] = useState<string | null>(null);
+  const [op, setOp] = useState<EditorOp | null>(null);
   const [busy, startTransition] = useTransition();
   const {
     register,
@@ -134,8 +170,9 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
     setValue,
     getValues,
     setError,
+    setFocus,
     formState: { errors, isDirty },
-  } = useForm<Values>({ resolver: zodResolver(formSchema), defaultValues: toValues(profile.draft) });
+  } = useForm<Values>({ resolver: zodResolver(formSchema), defaultValues: toValues(profile.draft), shouldFocusError: false });
   const live = useWatch({ control });
   const noindex = useWatch({ control, name: "noindex" });
   const blocks = useBlockList(profile.draft.blocks);
@@ -145,23 +182,32 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
   const avatarUploaded = isMediaUrl(avatar);
   // Uploaded images chosen here (saved or not) can't be deleted from the library.
   const selectedInEditor = [avatar, appearance.theme?.background.imageUrl, ...blocks.images].filter((u): u is string => isMediaUrl(u));
+  const [metadataDirty, setMetadataDirty] = useState(false);
+  const metadataReset = useRef<(() => void) | null>(null);
   const dirty = isDirty || blocks.dirty || appearance.dirty;
+  const navigationDirty = dirty || metadataDirty;
   const [protectedBlocks, setProtectedBlocks] = useState(profile.protectedBlocks);
   const locked = protectedBlocks > 0;
   const themeUnreadable = appearance.info.status === "invalid";
   const [tab, setTab] = useState<Tab>("content");
+  const [view, setView] = useState<View>("edit");
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const typing = useTyping();
+  const previewRef = useRef<HTMLDivElement>(null);
+  const paneRef = useRef<HTMLElement>(null);
 
   // False during SSR/hydration, true once hydrated; browser tests wait for it before typing.
   const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false);
 
   // Leaving with unsaved changes asks first. Pending holds the navigation to run if the person leaves anyway.
+  const router = useRouter();
   const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
   const leaving = useRef(false);
   // The dialog has no trigger button, so focus goes back to whatever opened it (a link, the switcher).
   const returnFocus = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (!dirty) return;
+    if (!navigationDirty) return;
     leaving.current = false;
     const confirm: ConfirmLeave = (proceed, origin) => {
       returnFocus.current = origin ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
@@ -175,8 +221,9 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
       const link = guardedLink(e);
       if (!link) return;
       e.preventDefault();
-      // Replaying the click keeps each link's own behavior (client-side or full navigation).
-      confirm(() => link.click());
+      // Replaying the click keeps each link's own behavior (client-side or full navigation). A link in a
+      // menu is gone once the menu closes, and a detached link can't navigate, so go to its address instead.
+      confirm(() => (link.isConnected ? link.click() : router.push(link.pathname + link.search + link.hash)));
     };
     window.addEventListener("beforeunload", warn);
     document.addEventListener("click", onClick, true);
@@ -186,7 +233,7 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
       document.removeEventListener("click", onClick, true);
       unregister();
     };
-  }, [dirty]);
+  }, [navigationDirty, router]);
 
   // The blocks and appearance the server last stored (the form keeps its own saved values).
   const [saved, setSaved] = useState({ blocks: profile.draft.blocks, theme: profile.draft.theme, appearance: profile.appearance });
@@ -194,7 +241,7 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
   function loadSaved(nextBlocks: typeof profile.draft.blocks | null, theme: ThemeConfig, info: AppearanceInfo) {
     if (nextBlocks) blocks.load(nextBlocks);
     appearance.load(theme, info);
-    setSaved((s) => ({ blocks: nextBlocks ?? s.blocks, theme, appearance: info }));
+    setSaved((sv) => ({ blocks: nextBlocks ?? sv.blocks, theme, appearance: info }));
   }
 
   /**
@@ -206,113 +253,181 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
     setPendingLeave(null);
     leaving.current = true;
     reset();
+    metadataReset.current?.();
+    setMetadataDirty(false);
     loadSaved(saved.blocks, saved.theme, saved.appearance);
-    setStatus(null);
+    setOutcome(null);
+    setInvalidText(null);
     proceed?.();
   }
 
-  /**
-   * Clears the message synchronously, then runs the async work in a transition.
-   * (State set inside an async transition before its first await commits only when
-   * the whole transition ends, after the updates made later, so it would erase them.)
-   */
-  function act(op: () => Promise<void>) {
-    setStatus(null);
-    startTransition(op);
+  // A "needs attention" outcome describes the content it checked; once that content changes, the top
+  // bar goes back to describing the draft (inline field errors keep their own detail).
+  const contentKey = JSON.stringify(live);
+  const basis = useRef({ contentKey, items: blocks.items, theme: appearance.theme });
+  useEffect(() => {
+    const changed = basis.current.contentKey !== contentKey || basis.current.items !== blocks.items || basis.current.theme !== appearance.theme;
+    basis.current = { contentKey, items: blocks.items, theme: appearance.theme };
+    if (changed && (invalidText !== null || (outcome?.kind === "error" && outcome.reason === "invalid"))) {
+      setInvalidText(null);
+      setOutcome((o) => (o?.kind === "error" && o.reason === "invalid" ? null : o));
+    }
+  }, [contentKey, blocks.items, appearance.theme, outcome, invalidText]);
+
+  // Linked selection: mark the selected block in the preview and keep it in view there.
+  // The shared renderer is untouched; its `.pp-block[data-block-id]` wrapper is the hook.
+  useEffect(() => {
+    const root = previewRef.current;
+    if (!root) return;
+    for (const el of root.querySelectorAll("[data-editor-selected]")) el.removeAttribute("data-editor-selected");
+    if (!blocks.selected || tab !== "content") return;
+    const el = root.querySelector<HTMLElement>(`.pp-block[data-block-id="${CSS.escape(blocks.selected)}"]`);
+    if (!el) return;
+    el.setAttribute("data-editor-selected", "");
+    const pane = paneRef.current;
+    if (!pane || pane.scrollHeight <= pane.clientHeight) return;
+    const p = pane.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    if (r.top < p.top + 56 || r.bottom > p.bottom - 16) pane.scrollTop += r.top - p.top - p.height / 3;
+  }, [blocks.selected, blocks.viewBlocks, tab, view]);
+
+  /** Shows a section of the editor (and the editor itself on small screens). */
+  function show(next: Tab) {
+    setTab(next);
+    setView("edit");
   }
 
-  /** Shows the Appearance tab and focuses the given field once it is visible. */
+  /**
+   * Clears the last outcome synchronously, then runs the async work in a
+   * transition. A rejected call (offline, server unreachable) becomes a
+   * visible failure instead of an unhandled error; nothing is lost locally.
+   */
+  function act(kind: EditorOp, work: () => Promise<void>) {
+    setOutcome(null);
+    setOp(kind);
+    startTransition(async () => {
+      try {
+        await work();
+      } catch {
+        setOutcome({ kind: "error", op: kind, reason: "network", text: NETWORK_ERROR[kind] });
+      }
+    });
+  }
+
+  /** Shows the Design section and focuses the given field once it is visible. */
   function revealAppearanceField(path: string) {
     appearance.focusField(path);
-    setTab("appearance");
+    show("design");
   }
 
   function fail(
+    kind: EditorOp,
     result: { error: string; code?: string; blockErrors?: BlockListErrors; fieldErrors?: Record<string, string[]> },
     sent?: typeof blocks.items,
   ) {
-    if (result.blockErrors && sent) blocks.applyServerErrors(result.blockErrors, sent);
+    if (result.blockErrors && sent) {
+      blocks.applyServerErrors(result.blockErrors, sent);
+      show("content");
+    }
     const avatarError = result.fieldErrors?.avatarUrl?.[0];
     if (avatarError) {
       setError("avatarUrl", { type: "server", message: avatarError });
-      setTab("content");
+      show("profile");
     }
     const themeErrors = Object.keys(result.fieldErrors ?? {}).filter((k) => k.startsWith("theme."));
     if (themeErrors.length) {
       appearance.applyServerErrors(result.fieldErrors ?? {});
       revealAppearanceField(themeErrors[0].slice("theme.".length));
     }
-    setStatus({ kind: "error", text: result.error, conflict: result.code === "CONFLICT" });
+    const reason = result.code === "CONFLICT" ? "conflict" : result.code === "VALIDATION" ? "invalid" : "other";
+    setOutcome({ kind: "error", op: kind, reason, text: result.error });
+    if (reason === "invalid") setInvalidText(result.error);
+  }
+
+  /** Content failed a client check: report it and keep Save and Publish blocked until the content changes. */
+  function markInvalid(kind: EditorOp, text: string) {
+    setOutcome({ kind: "error", op: kind, reason: "invalid", text });
+    setInvalidText(text);
   }
 
   /** Client-side block and appearance checks before any request; the server re-validates everything. */
-  function ready(): boolean {
+  function ready(kind: EditorOp): boolean {
     if (blocks.revealProblems()) {
-      setTab("content");
-      setStatus({ kind: "error", text: BLOCKS_INVALID });
+      show("content");
+      markInvalid(kind, BLOCKS_INVALID);
       return false;
     }
     if (appearance.pending.size) {
       revealAppearanceField([...appearance.pending][0]);
-      setStatus({ kind: "error", text: APPEARANCE_INVALID });
+      markInvalid(kind, APPEARANCE_INVALID);
       return false;
     }
     return true;
   }
 
+  /** Header fields failed client validation: show them, then focus the first once its section is visible. */
+  const headerInvalid = (kind: EditorOp) => (fieldErrors: FieldErrors<Values>) => {
+    show("profile");
+    markInvalid(kind, HEADER_INVALID);
+    const first = Object.keys(fieldErrors)[0] as keyof Values | undefined;
+    if (first) requestAnimationFrame(() => setFocus(first));
+  };
+
   const save = handleSubmit((values) => {
-    if (!ready()) return;
+    if (!ready("save")) return;
     const sent = blocks.items;
-    act(async () => {
+    act("save", async () => {
       const patch = toPatch(values, { blocks: blocks.toInput(), theme: appearance.toInput() });
       const result = await saveDraftAction(profile.id, { expectedRevision: state.revision, patch });
-      if (!result.ok) return fail(result, sent);
+      if (!result.ok) return fail("save", result, sent);
       reset(values);
       loadSaved(result.data.blocks, result.data.theme, result.data.appearance);
       media.refresh();
       setState((st) => ({ ...st, revision: result.data.revision, hasUnpublishedChanges: true }));
-      setStatus({
+      setOutcome({
         kind: "success",
+        op: "save",
         text: state.isPublished ? "Draft saved. Publish to update your public page." : "Draft saved.",
       });
     });
-  });
+  }, headerInvalid("save"));
 
   const publishWith = (values?: Values) => {
-    if (values && !ready()) return;
+    if (values && !ready("publish")) return;
     const sent = blocks.items;
     const patch = values ? toPatch(values, { blocks: blocks.toInput(), theme: appearance.toInput() }) : undefined;
-    act(async () => {
+    act("publish", async () => {
       const result = await publishAction(profile.id, { expectedRevision: state.revision, ...(patch ? { patch } : {}) });
-      if (!result.ok) return fail(result, sent);
+      if (!result.ok) return fail("publish", result, sent);
       if (values) reset(values);
       loadSaved(result.data.blocks, result.data.theme, result.data.appearance);
       media.refresh();
       setState({ revision: result.data.revision, isPublished: true, everPublished: true, hasUnpublishedChanges: false });
-      setStatus({ kind: "success", text: "Published. Your public page is up to date." });
+      setOutcome({ kind: "success", op: "publish", text: "Published. Your public page is up to date." });
     });
   };
 
-  const publish = () => (dirty ? handleSubmit((values) => publishWith(values))() : publishWith());
+  const publish = () => (dirty ? handleSubmit((values) => publishWith(values), headerInvalid("publish"))() : publishWith());
 
   const unpublish = () =>
-    act(async () => {
+    act("unpublish", async () => {
       const result = await unpublishAction(profile.id);
-      if (!result.ok) return fail(result);
+      if (!result.ok) return fail("unpublish", result);
       setState((st) => ({ ...st, isPublished: false }));
-      setStatus({ kind: "success", text: "Unpublished. Your public page is no longer available." });
+      setOutcome({ kind: "success", op: "unpublish", text: "Unpublished. Your public page is no longer available." });
     });
 
   const revert = () =>
-    act(async () => {
+    act("discard", async () => {
       const result = await revertDraftAction(profile.id, { expectedRevision: state.revision });
-      if (!result.ok) return fail(result);
+      if (!result.ok) return fail("discard", result);
       reset(toValues(result.data.draft));
       loadSaved(result.data.draft.blocks, result.data.draft.theme, result.data.appearance);
+      setInvalidText(null);
       setProtectedBlocks(result.data.protectedBlocks);
       media.refresh();
       setState((st) => ({ ...st, revision: result.data.revision, hasUnpublishedChanges: false }));
-      setStatus({ kind: "success", text: "Draft changes discarded." });
+      setOutcome({ kind: "success", op: "discard", text: "Draft changes discarded." });
     });
 
   /**
@@ -320,245 +435,522 @@ export function ProfileEditor({ profile }: { profile: EditorProfile }) {
    * Only offered without unsaved changes, so the header sent is the saved one.
    */
   const replaceAppearance = (presetId: PresetId) =>
-    act(async () => {
+    act("replace", async () => {
       const values = getValues();
       const result = await saveDraftAction(profile.id, { expectedRevision: state.revision, patch: toPatch(values, { replaceTheme: presetId }) });
-      if (!result.ok) return fail(result);
+      if (!result.ok) return fail("replace", result);
       loadSaved(null, result.data.theme, result.data.appearance);
       media.refresh();
       setState((st) => ({ ...st, revision: result.data.revision, hasUnpublishedChanges: true }));
-      setStatus({ kind: "success", text: "Appearance replaced and draft saved." });
+      setOutcome({ kind: "success", op: "replace", text: "Appearance replaced and draft saved." });
     });
 
-  const upToDate = state.isPublished && !state.hasUnpublishedChanges && !dirty;
+  const st = editorStatus({
+    pending: busy ? op : null,
+    outcome,
+    invalid: invalidText !== null,
+    dirty,
+    isPublished: state.isPublished,
+    hasUnpublishedChanges: state.hasUnpublishedChanges,
+    locked,
+    themeUnreadable,
+  });
   const canDiscard = state.everPublished && (state.hasUnpublishedChanges || dirty);
+  const controlsOff = busy || locked;
+  const headerIssues = Object.keys(errors).length;
+  const blockIssues = blocks.items.filter((i) => blocks.errorsFor(i).attention).length;
+  const hiddenBlocks = blocks.items.filter((i) => !i.visible).length;
+  const retry = outcome?.kind === "error" && (outcome.reason === "network" || outcome.reason === "other") ? outcome.op : null;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]" data-hydrated={hydrated || undefined}>
-      <section aria-labelledby="content-heading" className="grid content-start gap-5 rounded-xl border bg-card p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="content-heading" className="text-sm font-medium">
-            Content
-          </h2>
-          <div className="flex flex-wrap items-center gap-2">
-            {dirty && (
-              <span className="text-xs font-medium text-amber-700 dark:text-amber-400" data-testid="unsaved-indicator">
-                Unsaved changes
-              </span>
-            )}
-            <ProfileStatusBadge isPublished={state.isPublished} hasUnpublishedChanges={state.hasUnpublishedChanges} />
+    <Tabs
+      value={tab}
+      onValueChange={(v) => show(v as Tab)}
+      className="flex min-h-dvh min-w-0 flex-1 flex-col gap-0 ed-lg:h-dvh"
+      data-hydrated={hydrated || undefined}
+    >
+      <header className="sticky top-0 z-30 border-b border-cl-line bg-cl-surface pt-[env(safe-area-inset-top)]">
+        <div className="flex min-h-14 items-center gap-1 px-1.5 py-1.5 ed-md:gap-2 ed-md:px-4">
+          <WorkspaceMenu links={links} className="ed-lg:hidden" />
+          <Button asChild variant="ghost" size="icon" className="size-11 ed-lg:size-10">
+            <Link href="/dashboard/profiles" aria-label="Back to profiles">
+              <ChevronLeft aria-hidden="true" />
+            </Link>
+          </Button>
+          <div className="flex min-w-0 flex-1 flex-col ed-md:flex-row ed-md:items-center ed-md:gap-5">
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-semibold tracking-tight">{label}</h1>
+              <p className="truncate font-mono text-xs text-cl-ink-2 max-ed-md:hidden" data-testid="editor-handle">
+                /{profile.handle}
+              </p>
+            </div>
+            <StatusLine st={st} />
           </div>
+
+          {/* One set of controls: in the top bar from 45rem, a bottom action bar on phones. */}
+          <div
+            role="group"
+            aria-label="Save and publish"
+            className={[
+              "flex items-center gap-2",
+              "max-ed-md:fixed max-ed-md:inset-x-0 max-ed-md:bottom-0 max-ed-md:z-30 max-ed-md:border-t max-ed-md:border-cl-line max-ed-md:bg-cl-surface",
+              "max-ed-md:px-3 max-ed-md:pt-2.5 max-ed-md:pb-[calc(0.625rem+env(safe-area-inset-bottom))]",
+              // While the soft keyboard is likely open, the bar steps aside.
+              typing ? "max-ed-md:hidden" : "",
+            ].join(" ")}
+          >
+            <Button type="button" variant="outline" className="h-11 flex-[0.8] ed-md:hidden" onClick={() => setView(view === "edit" ? "preview" : "edit")}>
+              {view === "edit" ? <Eye aria-hidden="true" /> : <Pencil aria-hidden="true" />}
+              {view === "edit" ? "Preview" : "Edit"}
+            </Button>
+            {state.isPublished && (
+              <Button asChild variant="ghost" className="h-10 max-[60rem]:hidden">
+                <a href={`/${profile.handle}`} target="_blank" rel="noopener">
+                  <SquareArrowOutUpRight aria-hidden="true" />
+                  View live
+                </a>
+              </Button>
+            )}
+            <Button
+              type="submit"
+              form="header-form"
+              variant="outline"
+              className="h-10 max-ed-lg:h-11 max-ed-md:flex-1"
+              disabled={!st.canSave}
+              aria-busy={st.key === "saving" || undefined}
+            >
+              {st.key === "saving" && <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" />}
+              Save draft
+            </Button>
+            <Button
+              type="button"
+              className="h-10 max-ed-lg:h-11 max-ed-md:flex-1"
+              onClick={publish}
+              disabled={!st.canPublish}
+              aria-busy={st.key === "publishing" || undefined}
+            >
+              {st.key === "publishing" && <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" />}
+              {st.publishLabel}
+            </Button>
+          </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="icon" className="size-11 ed-lg:size-10" aria-label="More profile actions">
+                <MoreHorizontal aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-56">
+              {state.isPublished && (
+                <DropdownMenuItem asChild className="min-h-11 ed-lg:min-h-9">
+                  <a href={`/${profile.handle}`} target="_blank" rel="noopener">
+                    <SquareArrowOutUpRight aria-hidden="true" />
+                    View public page
+                  </a>
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem asChild className="min-h-11 ed-lg:min-h-9">
+                <Link href={`/dashboard/profiles/${profile.id}/analytics`}>
+                  <ChartLine aria-hidden="true" />
+                  Analytics and QR code
+                </Link>
+              </DropdownMenuItem>
+              {(state.isPublished || canDiscard) && <DropdownMenuSeparator />}
+              {canDiscard && (
+                <DropdownMenuItem className="min-h-11 ed-lg:min-h-9" disabled={busy} onSelect={() => setDiscardOpen(true)}>
+                  Discard draft changes
+                </DropdownMenuItem>
+              )}
+              {state.isPublished && (
+                <DropdownMenuItem className="min-h-11 ed-lg:min-h-9" disabled={busy} onSelect={unpublish}>
+                  Unpublish
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
-        {locked && (
-          <div role="note" className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm" data-testid="protected-blocks">
-            This draft contains {protectedBlocks === 1 ? "a block" : `${protectedBlocks} blocks`} that this version of COVALink
-            can&apos;t edit without losing data. To protect {protectedBlocks === 1 ? "it" : "them"}, saving and publishing are
-            turned off.
-            {state.everPublished && " Discarding draft changes restores your published version."}
-          </div>
-        )}
-
-        {/* Both panels stay mounted (the Save button submits #header-form); the inactive one is hidden. */}
-        <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="gap-5">
-          <TabsList className="w-full sm:w-fit">
-            <TabsTrigger value="content">Content</TabsTrigger>
-            <TabsTrigger value="appearance">
-              Appearance
+        <div className="flex items-center gap-2 px-1.5 ed-md:px-4">
+          <TabsList variant="line" aria-label="Editor sections" className="h-auto gap-1 p-0 max-ed-md:w-full">
+            <TabsTrigger value="profile" className={tabTrigger}>
+              Profile
+              {headerIssues > 0 && <IssueCount n={headerIssues} />}
+            </TabsTrigger>
+            <TabsTrigger value="content" className={tabTrigger}>
+              Content
+              {blockIssues > 0 && <IssueCount n={blockIssues} />}
+            </TabsTrigger>
+            <TabsTrigger value="design" className={tabTrigger}>
+              Design
               {appearance.issues.length > 0 && appearance.theme && (
-                <span className="size-2 rounded-full bg-amber-500" aria-label="needs attention" role="img" />
+                <span className="size-2 rounded-full bg-cl-warn" aria-label="needs attention" role="img" />
               )}
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="content" forceMount className="grid gap-5 data-[state=inactive]:hidden">
-            <h3 className="text-sm font-medium">Header &amp; search</h3>
-            <form id="header-form" onSubmit={save} noValidate className="grid gap-4">
-              <FormField id="displayName" label="Display name" error={errors.displayName?.message} {...register("displayName")} />
-              <div className="grid gap-1.5">
-                <Label htmlFor="bio">Bio</Label>
-                <Textarea
-                  id="bio"
-                  rows={4}
-                  aria-invalid={errors.bio ? true : undefined}
-                  aria-describedby={errors.bio ? "bio-error" : "bio-hint"}
-                  {...register("bio")}
-                />
-                {errors.bio ? (
-                  <p id="bio-error" className="text-xs text-destructive">
-                    {errors.bio.message}
-                  </p>
+          {switcher && <div className="ml-auto hidden py-1 ed-md:block">{switcher}</div>}
+          <div role="group" aria-label="View" className={`${switcher ? "" : "ml-auto"} hidden gap-0.5 rounded-cl-md bg-cl-inset p-0.5 ed-md:max-ed-lg:flex`}>
+            {(["edit", "preview"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={view === v}
+                onClick={() => setView(v)}
+                className="min-h-11 rounded-cl-sm px-4 text-sm font-medium text-cl-ink-2 outline-none focus-visible:ring-2 focus-visible:ring-cl-accent aria-pressed:bg-cl-surface aria-pressed:font-semibold aria-pressed:text-cl-ink aria-pressed:shadow-[0_0_0_1px_var(--cl-line-strong)]"
+              >
+                {v === "edit" ? "Edit" : "Preview"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 ed-lg:grid ed-lg:min-h-0 ed-lg:grid-cols-[minmax(0,1fr)_minmax(22rem,27rem)] ed-lg:grid-rows-[auto_minmax(0,1fr)]">
+        {/* One message area for both views: above the editor, and above the preview below 75rem. */}
+        <div className="min-w-0 px-3 ed-md:px-6 ed-lg:col-start-1 ed-lg:row-start-1">
+          <div className="mx-auto grid max-w-176 gap-4 has-[>:not(.sr-only)]:pt-4 ed-md:has-[>:not(.sr-only)]:pt-5">
+            <Messages
+              st={st}
+              outcome={outcome}
+              invalidText={invalidText}
+              dirty={dirty}
+              locked={locked}
+              protectedBlocks={protectedBlocks}
+              everPublished={state.everPublished}
+              themeUnreadable={themeUnreadable}
+              onOpenDesign={() => show("design")}
+              onRetry={retry === "save" ? () => save() : retry === "publish" ? publish : null}
+            />
+          </div>
+        </div>
+        <div
+          className={`min-w-0 px-3 py-4 max-ed-md:pb-28 ed-md:px-6 ed-md:py-5 ed-lg:col-start-1 ed-lg:row-start-2 ed-lg:overflow-y-auto ${view === "preview" ? "max-ed-lg:hidden" : ""}`}
+        >
+          <div className="mx-auto grid max-w-176 gap-4">
+            {/* All sections stay mounted (Save submits #header-form); the inactive ones are hidden. */}
+            <TabsContent value="profile" forceMount className="grid gap-5 data-[state=inactive]:hidden">
+              <SectionHeading title="Profile" lede="Who this page belongs to, and how people find it." />
+              <form id="header-form" onSubmit={save} noValidate>
+                <fieldset disabled={busy} className="grid min-w-0 gap-5">
+                <section aria-labelledby="identity-heading" className={card}>
+                  <h3 id="identity-heading" className="text-sm font-semibold">
+                    Identity
+                  </h3>
+                  <FormField id="displayName" label="Display name" error={errors.displayName?.message} {...register("displayName")} />
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="bio">Bio</Label>
+                    <Textarea
+                      id="bio"
+                      rows={4}
+                      aria-invalid={errors.bio ? true : undefined}
+                      aria-describedby={errors.bio ? "bio-error" : "bio-hint"}
+                      {...register("bio")}
+                    />
+                    {errors.bio ? (
+                      <p id="bio-error" className="text-xs text-destructive">
+                        {errors.bio.message}
+                      </p>
+                    ) : (
+                      <p id="bio-hint" className="text-xs text-muted-foreground">
+                        Plain text, up to 300 characters. Line breaks are kept.
+                      </p>
+                    )}
+                  </div>
+                  <fieldset className="grid min-w-0 gap-4 rounded-cl-md border border-cl-line p-4" disabled={controlsOff}>
+                    <legend className="px-1 text-sm font-medium">Avatar</legend>
+                    <MediaPicker
+                      kind="avatar"
+                      id="avatar-upload"
+                      label="Uploaded avatar"
+                      value={avatarUploaded ? avatar : undefined}
+                      onSelect={(url) => setValue("avatarUrl", url, { shouldDirty: true, shouldValidate: true })}
+                      onClear={() => setValue("avatarUrl", "", { shouldDirty: true, shouldValidate: true })}
+                      library={media}
+                      selectedInEditor={selectedInEditor}
+                      disabled={controlsOff}
+                      error={avatarUploaded ? errors.avatarUrl?.message : undefined}
+                    />
+                    {!avatarUploaded && (
+                      <FormField
+                        id="avatarUrl"
+                        label="Or use an image address"
+                        type="url"
+                        inputMode="url"
+                        placeholder="https://…"
+                        hint="An https:// image on another site. It's loaded from that site when people visit your page."
+                        error={errors.avatarUrl?.message}
+                        {...register("avatarUrl")}
+                      />
+                    )}
+                  </fieldset>
+                </section>
+                <section aria-labelledby="search-heading" className={card}>
+                  <h3 id="search-heading" className="text-sm font-semibold">
+                    Search and sharing
+                  </h3>
+                  <FormField
+                    id="seoTitle"
+                    label="Page title (optional)"
+                    hint="Defaults to your display name."
+                    error={errors.seoTitle?.message}
+                    {...register("seoTitle")}
+                  />
+                  <FormField
+                    id="seoDescription"
+                    label="Description (optional)"
+                    hint="Defaults to your bio."
+                    error={errors.seoDescription?.message}
+                    {...register("seoDescription")}
+                  />
+                  <div className="flex min-h-11 items-center gap-3">
+                    <Switch id="noindex" checked={noindex} onCheckedChange={(v) => setValue("noindex", v, { shouldDirty: true })} />
+                    <Label htmlFor="noindex">Hide from search engines</Label>
+                  </div>
+                </section>
+                </fieldset>
+              </form>
+              <MetadataGuard.Provider value={{ changed: setMetadataDirty, registerReset: (reset) => { metadataReset.current = reset; return () => { metadataReset.current = null; }; } }}>{manage}</MetadataGuard.Provider>
+            </TabsContent>
+
+            <TabsContent value="content" forceMount className="grid gap-5 data-[state=inactive]:hidden">
+              <SectionHeading title="Content" lede="Visitors see these blocks in order. Drag a handle, or focus it and use the arrow keys." />
+              <BlockListEditor list={blocks} disabled={controlsOff} media={{ library: media, selectedInEditor }} />
+            </TabsContent>
+
+            <TabsContent value="design" forceMount className="grid gap-5 data-[state=inactive]:hidden">
+              <SectionHeading title="Design" lede="How your public page looks. These settings never change the dashboard." />
+              <AppearanceEditor
+                list={appearance}
+                disabled={controlsOff}
+                canReplace={!dirty}
+                onReplace={replaceAppearance}
+                media={media}
+                selectedInEditor={selectedInEditor}
+              />
+            </TabsContent>
+          </div>
+        </div>
+
+        <aside
+          ref={paneRef}
+          aria-labelledby="preview-heading"
+          className={`min-w-0 bg-cl-inset max-ed-md:pb-28 ed-lg:col-start-2 ed-lg:row-span-2 ed-lg:row-start-1 ed-lg:overflow-y-auto ed-lg:border-l ed-lg:border-cl-line ${view === "edit" ? "max-ed-lg:hidden" : ""}`}
+        >
+          <div className="sticky top-0 z-10 flex min-h-12 items-center gap-2 bg-cl-inset px-4">
+            <h2 id="preview-heading" className="text-sm font-semibold">
+              Preview
+            </h2>
+            <span className="truncate text-sm text-cl-ink-2">
+              Draft
+              {hiddenBlocks > 0 && ` · ${hiddenBlocks} hidden ${hiddenBlocks === 1 ? "block" : "blocks"} not shown`}
+            </span>
+          </div>
+          <div className="px-3 pt-1 pb-6 ed-md:px-4">
+            <div ref={previewRef} className="mx-auto max-w-sm overflow-hidden rounded-cl-lg ring-1 ring-cl-line" data-testid="profile-preview">
+              <ProfileView
+                document={previewDocument(profile.draft, live, blocks.viewBlocks, appearance.previewTheme)}
+                verified={profile.verified}
+                mode="preview"
+              />
+            </div>
+          </div>
+        </aside>
+      </main>
+
+      <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard draft changes?</AlertDialogTitle>
+            <AlertDialogDescription>Your draft goes back to what is currently published. This can&apos;t be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction onClick={revert}>Discard changes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={pendingLeave !== null} onOpenChange={(open) => !open && setPendingLeave(null)}>
+        <AlertDialogContent
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            returnFocus.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
+            <AlertDialogDescription>You have unsaved changes in this profile. If you leave now, they&apos;re lost.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction onClick={leaveWithoutSaving}>Leave without saving</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Tabs>
+  );
+}
+
+/**
+ * True while a soft keyboard is open: a text field has focus and the visual
+ * viewport has shrunk. A hardware keyboard (or none) never hides the action bar.
+ */
+function useTyping() {
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const isText = (el: Element | null) =>
+      el instanceof HTMLTextAreaElement ||
+      (el instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit", "file", "range", "color"].includes(el.type));
+    const check = () => setTyping(isText(document.activeElement) && vv.height < window.innerHeight * 0.8);
+    // focusout fires before the next element is focused; check once focus has settled.
+    const later = () => requestAnimationFrame(check);
+    vv.addEventListener("resize", check);
+    document.addEventListener("focusin", check);
+    document.addEventListener("focusout", later);
+    return () => {
+      vv.removeEventListener("resize", check);
+      document.removeEventListener("focusin", check);
+      document.removeEventListener("focusout", later);
+    };
+  }, []);
+  return typing;
+}
+
+function SectionHeading({ title, lede }: { title: string; lede: string }) {
+  return (
+    <div>
+      <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+      <p className="text-sm text-cl-ink-2">{lede}</p>
+    </div>
+  );
+}
+
+function IssueCount({ n }: { n: number }) {
+  return (
+    <span className="rounded-cl-sm border border-cl-danger px-1 text-xs leading-4 font-semibold text-cl-danger">
+      {n}
+      <span className="sr-only"> {n === 1 ? "problem" : "problems"} to fix</span>
+    </span>
+  );
+}
+
+const TONE = { neutral: "text-cl-ink-2", ok: "text-cl-ok", warn: "text-cl-warn", bad: "text-cl-danger" } as const;
+
+/** Top-bar state: an icon and words, never colour alone. Announcements come from the message area. */
+function StatusLine({ st }: { st: EditorStatus }) {
+  const icon = {
+    spinner: <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />,
+    check: <CircleCheck className="size-3.5" aria-hidden="true" />,
+    dot: <Dot className="-mx-1 size-5" aria-hidden="true" />,
+    alert: <CircleAlert className="size-3.5" aria-hidden="true" />,
+    lock: <Lock className="size-3.5" aria-hidden="true" />,
+  }[st.icon];
+  return (
+    <p className={`flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap ${TONE[st.tone]}`} data-testid="profile-status" data-state={st.key}>
+      {icon}
+      <span data-testid={st.key === "unsaved" ? "unsaved-indicator" : undefined}>{st.label}</span>
+    </p>
+  );
+}
+
+const banner = "grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-2 rounded-cl-md border px-4 py-3 text-sm";
+
+/** The message area: what happened, why, and the way forward. */
+function Messages({
+  st,
+  outcome,
+  invalidText,
+  dirty,
+  locked,
+  protectedBlocks,
+  everPublished,
+  themeUnreadable,
+  onOpenDesign,
+  onRetry,
+}: {
+  st: EditorStatus;
+  outcome: EditorOutcome;
+  invalidText: string | null;
+  dirty: boolean;
+  locked: boolean;
+  protectedBlocks: number;
+  everPublished: boolean;
+  themeUnreadable: boolean;
+  onOpenDesign: () => void;
+  onRetry: (() => void) | null;
+}) {
+  // A later operation's feedback replaces the outcome, but unresolved validation problems stay reported.
+  const error = outcome?.kind === "error" ? outcome : invalidText ? ({ op: "save", text: invalidText } as const) : null;
+  // A success message describes the last action; once there are new edits, "Unsaved changes" is the state.
+  const success = outcome?.kind === "success" && (!dirty || outcome.op === "unpublish") ? outcome.text : "";
+  return (
+    <>
+      {locked && (
+        <div role="note" className={`${banner} border-cl-warn/40 bg-cl-warn-wash`} data-testid="protected-blocks">
+          <Lock className="mt-0.5 size-4 text-cl-warn" aria-hidden="true" />
+          <p>
+            This draft contains {protectedBlocks === 1 ? "a block" : `${protectedBlocks} blocks`} that this version of COVALink can&apos;t
+            edit without losing data. To protect {protectedBlocks === 1 ? "it" : "them"}, saving and publishing are turned off.
+            {everPublished && " Discarding draft changes restores your published version."}
+          </p>
+        </div>
+      )}
+      {themeUnreadable && (
+        <div role="note" className={`${banner} border-cl-warn/40 bg-cl-warn-wash`} data-testid="publish-blocked">
+          <Lock className="mt-0.5 size-4 text-cl-warn" aria-hidden="true" />
+          <p>
+            <strong className="font-semibold">Publishing is turned off</strong> until you replace the saved appearance in Design. Your content
+            can still be edited and saved, and your public page is unchanged.
+          </p>
+          <div className="col-start-2">
+            <Button type="button" variant="outline" className="h-10 max-ed-lg:h-11" onClick={onOpenDesign}>
+              Open Design
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Always rendered so screen readers announce changes to the live region. */}
+      <div role="alert" aria-live="assertive" className={error ? `${banner} border-cl-danger/40 bg-cl-danger-wash` : "sr-only"}>
+        {error && (
+          <>
+            <CircleAlert className="mt-0.5 size-4 text-cl-danger" aria-hidden="true" />
+            <p>
+              {st.key === "conflict" && <strong className="font-semibold">Someone or something changed this profile after you opened it. </strong>}
+              {error.text}
+              {error.op === "unpublish" && " Check the public page before retrying Unpublish from More profile actions."}
+              {error.op === "discard" && " Your local edits are still here. Retry Discard draft changes from More profile actions."}
+              {error.op === "replace" && " Your local edits are still here. Open Design and retry replacing the appearance."}
+            </p>
+            {(st.key === "conflict" || onRetry) && (
+              <div className="col-start-2 flex flex-wrap gap-2">
+                {st.key === "conflict" ? (
+                  <Button type="button" className="h-10 max-ed-lg:h-11" onClick={() => navigateWithGuard(() => window.location.reload())}>
+                    <RotateCw aria-hidden="true" />
+                    Reload latest version
+                  </Button>
                 ) : (
-                  <p id="bio-hint" className="text-xs text-muted-foreground">
-                    Plain text, up to 300 characters. Line breaks are kept.
-                  </p>
+                  onRetry && (
+                    <Button type="button" variant="outline" className="h-10 max-ed-lg:h-11" onClick={onRetry}>
+                      <RotateCw aria-hidden="true" />
+                      Try again
+                    </Button>
+                  )
                 )}
               </div>
-              <fieldset className="grid min-w-0 gap-4 rounded-lg border p-4" disabled={busy || locked}>
-                <legend className="px-1 text-sm font-medium">Avatar</legend>
-                <MediaPicker
-                  kind="avatar"
-                  id="avatar-upload"
-                  label="Uploaded avatar"
-                  value={avatarUploaded ? avatar : undefined}
-                  onSelect={(url) => setValue("avatarUrl", url, { shouldDirty: true, shouldValidate: true })}
-                  onClear={() => setValue("avatarUrl", "", { shouldDirty: true, shouldValidate: true })}
-                  library={media}
-                  selectedInEditor={selectedInEditor}
-                  disabled={busy || locked}
-                  error={avatarUploaded ? errors.avatarUrl?.message : undefined}
-                />
-                {!avatarUploaded && (
-                  <FormField
-                    id="avatarUrl"
-                    label="Or use an image address"
-                    type="url"
-                    inputMode="url"
-                    placeholder="https://…"
-                    hint="An https:// image on another site. It's loaded from that site when people visit your page."
-                    error={errors.avatarUrl?.message}
-                    {...register("avatarUrl")}
-                  />
-                )}
-              </fieldset>
-              <fieldset className="grid gap-4 rounded-lg border p-4">
-                <legend className="px-1 text-sm font-medium">Search &amp; sharing</legend>
-                <FormField
-                  id="seoTitle"
-                  label="Page title (optional)"
-                  hint="Defaults to your display name."
-                  error={errors.seoTitle?.message}
-                  {...register("seoTitle")}
-                />
-                <FormField
-                  id="seoDescription"
-                  label="Description (optional)"
-                  hint="Defaults to your bio."
-                  error={errors.seoDescription?.message}
-                  {...register("seoDescription")}
-                />
-                <div className="flex items-center gap-3">
-                  <Switch
-                    id="noindex"
-                    checked={noindex}
-                    onCheckedChange={(v) => setValue("noindex", v, { shouldDirty: true })}
-                  />
-                  <Label htmlFor="noindex">Hide from search engines</Label>
-                </div>
-              </fieldset>
-            </form>
-
-            <BlockListEditor list={blocks} disabled={busy || locked} media={{ library: media, selectedInEditor }} />
-          </TabsContent>
-          <TabsContent value="appearance" forceMount className="grid gap-5 data-[state=inactive]:hidden">
-            <AppearanceEditor
-              list={appearance}
-              disabled={busy || locked}
-              canReplace={!dirty}
-              onReplace={replaceAppearance}
-              media={media}
-              selectedInEditor={selectedInEditor}
-            />
-          </TabsContent>
-        </Tabs>
-
-        {themeUnreadable && (
-          <p className="text-sm text-muted-foreground" data-testid="publish-blocked">
-            Publishing is turned off until you replace the saved appearance (Appearance tab).
-          </p>
+            )}
+          </>
         )}
-
-        <FormAlert message={status?.kind === "error" ? status.text : null} />
-        {status?.conflict && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="w-fit"
-            onClick={() => navigateWithGuard(() => window.location.reload())}
-          >
-            Reload latest version
-          </Button>
-        )}
-        {/* A success message describes the last action; once there are new edits, "Unsaved changes" is the state. */}
-        <p role="status" aria-live="polite" className="text-sm text-muted-foreground" data-testid="editor-status">
-          {status?.kind === "success" && !dirty ? status.text : ""}
-        </p>
-
-        <AlertDialog open={pendingLeave !== null} onOpenChange={(open) => !open && setPendingLeave(null)}>
-          <AlertDialogContent
-            onCloseAutoFocus={(e) => {
-              e.preventDefault();
-              returnFocus.current?.focus();
-            }}
-          >
-            <AlertDialogHeader>
-              <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
-              <AlertDialogDescription>
-                You have unsaved changes in this profile. If you leave now, they&apos;re lost.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Keep editing</AlertDialogCancel>
-              <AlertDialogAction onClick={leaveWithoutSaving}>Leave without saving</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" form="header-form" variant="outline" disabled={busy || locked || !dirty}>
-            Save draft
-          </Button>
-          <Button type="button" onClick={publish} disabled={busy || locked || upToDate || themeUnreadable}>
-            {upToDate ? "Published" : state.isPublished ? "Publish changes" : "Publish"}
-          </Button>
-          {state.isPublished && (
-            <Button type="button" variant="ghost" onClick={unpublish} disabled={busy}>
-              Unpublish
-            </Button>
-          )}
-          {canDiscard && (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button type="button" variant="ghost" disabled={busy}>
-                  Discard draft changes
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Discard draft changes?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Your draft goes back to what is currently published. This can&apos;t be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Keep editing</AlertDialogCancel>
-                  <AlertDialogAction onClick={revert}>Discard changes</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          )}
-          {state.isPublished && (
-            <Button asChild variant="link">
-              <a href={`/${profile.handle}`} target="_blank" rel="noopener">
-                View public page
-              </a>
-            </Button>
-          )}
-        </div>
-      </section>
-
-      <section aria-labelledby="preview-heading" className="grid content-start gap-2">
-        <h2 id="preview-heading" className="text-sm font-medium">
-          Preview <span className="font-normal text-muted-foreground">(draft)</span>
-        </h2>
-        <div className="overflow-hidden rounded-2xl border shadow-sm lg:sticky lg:top-4" data-testid="profile-preview">
-          <ProfileView
-            document={previewDocument(profile.draft, live, blocks.viewBlocks, appearance.previewTheme)}
-            verified={profile.verified}
-            mode="preview"
-          />
-        </div>
-      </section>
-    </div>
+      </div>
+      <p
+        role="status"
+        aria-live="polite"
+        className={success ? `${banner} grid-cols-1 border-cl-ok/40 bg-cl-ok-wash font-medium` : "sr-only"}
+        data-testid="editor-status"
+      >
+        {success}
+      </p>
+    </>
   );
 }

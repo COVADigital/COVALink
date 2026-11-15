@@ -273,7 +273,7 @@ test("social badges reach 4.5:1 under all ten presets, rendered in the preview a
     }
   };
 
-  await page.getByRole("tab", { name: /Appearance/ }).click();
+  await page.getByRole("tab", { name: /Design/ }).click();
   expect(THEME_PRESETS).toHaveLength(10);
   for (const { id } of THEME_PRESETS) {
     await page.locator("label").filter({ has: page.getByTestId(`preset-${id}`) }).click();

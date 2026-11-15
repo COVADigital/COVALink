@@ -117,7 +117,7 @@ test("adds an image block with upload, inline validation and focus; it persists 
   await expect(previewImage).toHaveAttribute("alt", "A lighthouse at dusk");
 
   // Decorative: the description must be empty and a link isn't allowed; nothing is cleared silently.
-  const decorative = card(page).getByRole("switch", { name: "Decorative image" });
+  const decorative = card(page).getByRole("switch", { name: "Decorative image", exact: true });
   await decorative.click();
   await expect(decorative).toHaveAttribute("aria-checked", "true");
   await expect(card(page).getByText("Leave the description empty for a decorative image")).toBeVisible();
@@ -155,7 +155,7 @@ test("adds an image block with upload, inline validation and focus; it persists 
   await expect(byIdSuffix(card(page), "-caption")).toHaveValue("Point Reyes");
   await expect(byIdSuffix(card(page), "-href")).toHaveValue(DESTINATION);
   await expect(card(page).getByRole("combobox", { name: "Shape" })).toHaveValue("wide");
-  await expect(card(page).getByRole("switch", { name: "Decorative image" })).toHaveAttribute("aria-checked", "false");
+  await expect(card(page).getByRole("switch", { name: "Decorative image", exact: true })).toHaveAttribute("aria-checked", "false");
   await expect(pickerItems(page).first().getByRole("button", { name: /^Use lighthouse\.png/ })).toHaveAttribute("aria-pressed", "true");
   await expect(card(page).getByTestId("block-label")).toHaveText("A lighthouse at dusk");
 

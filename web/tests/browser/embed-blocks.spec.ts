@@ -294,7 +294,7 @@ test("opened from the dashboard link, the page has the embed policy and the play
   await page.locator("[data-hydrated]").waitFor();
   const [publicPage] = await Promise.all([
     context.waitForEvent("page"),
-    page.getByRole("link", { name: /view public page|view page|open public page/i }).first().click(),
+    page.getByRole("link", { name: /view live|view public page|view page|open public page/i }).first().click(),
   ]);
   const problems: string[] = [];
   publicPage.on("console", (m) => {

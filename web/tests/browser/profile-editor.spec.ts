@@ -91,6 +91,7 @@ test("creates a profile from the dashboard with a normalized handle", async ({ p
 test("edits update the shared preview live; saving a draft keeps the page unpublished", async ({ page }) => {
   await openEditor(page);
   const preview = page.getByTestId("profile-preview").filter({ visible: true });
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#displayName").fill("Casey Draft");
   await page.locator("#bio").fill("Line one\nLine two");
   await expect(preview.getByTestId("profile-name")).toHaveText("Casey Draft");
@@ -108,6 +109,7 @@ test("edits update the shared preview live; saving a draft keeps the page unpubl
 
 test("invalid input is reported inline and nothing is saved", async ({ page }) => {
   await openEditor(page);
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#displayName").fill("");
   await page.locator("#avatarUrl").fill("javascript:alert(1)");
   await page.getByRole("button", { name: "Save draft" }).click();
@@ -134,6 +136,7 @@ test("publishing makes the page public with the published content", async ({ pag
 
 test("draft edits stay private until published again", async ({ page, context }) => {
   await openEditor(page);
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#displayName").fill("Secret Next Version");
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.getByTestId("editor-status").filter({ visible: true })).toContainText("Draft saved");
@@ -156,10 +159,12 @@ test("a stale tab can't overwrite newer changes and is offered a reload", async 
   const other = await context.newPage();
   await openEditor(other);
 
+  await other.getByRole("tab", { name: "Profile" }).click();
   await other.locator("#bio").fill("Saved in the other tab");
   await other.getByRole("button", { name: "Save draft" }).click();
   await expect(other.getByTestId("editor-status").filter({ visible: true })).toContainText("Draft saved");
 
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#bio").fill("Saved in the stale tab");
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.locator("form [role=alert], [role=alert]").filter({ hasText: "changed somewhere else" })).toBeVisible();
@@ -171,6 +176,7 @@ test("a stale tab can't overwrite newer changes and is offered a reload", async 
 
 test("renaming the handle moves the public page after confirmation", async ({ page }) => {
   await openEditor(page);
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.locator("#settings-handle").fill("creator-renamed");
   await page.getByRole("button", { name: "Save address & name" }).click();
   await expect(page.getByRole("alertdialog")).toContainText("/creatorpage will stop working");
@@ -183,7 +189,8 @@ test("renaming the handle moves the public page after confirmation", async ({ pa
 
 test("unpublish takes the page offline and publish brings it back", async ({ page }) => {
   await openEditor(page);
-  await page.getByRole("button", { name: "Unpublish" }).click();
+  await page.getByRole("button", { name: "More profile actions" }).click();
+  await page.getByRole("menuitem", { name: "Unpublish" }).click();
   await expect(page.getByTestId("editor-status").filter({ visible: true })).toContainText("no longer available");
   expect(await publicStatus(page, handle)).toBe(404);
   await page.getByRole("button", { name: /^Publish/ }).click();
@@ -210,6 +217,7 @@ test("the header switcher changes the active profile", async ({ page }) => {
 
 test("deleting requires typing the handle and removes the public page", async ({ page }) => {
   await openEditor(page);
+  await page.getByRole("tab", { name: "Profile" }).click();
   await page.getByRole("button", { name: "Delete profile" }).click();
   const confirm = page.getByRole("button", { name: "Delete permanently" });
   await expect(confirm).toBeDisabled();
@@ -228,6 +236,9 @@ test.describe("phone viewport", () => {
     await page.goto("/dashboard/profiles");
     await page.getByRole("link", { name: "Edit" }).first().click();
     await page.locator("[data-hydrated]").waitFor();
+    expect(await noOverflow()).toBe(true);
+    // Phones show the preview through the labelled Preview control, not below the editor.
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
     expect(await noOverflow()).toBe(true);
     await page.getByTestId("profile-preview").filter({ visible: true }).scrollIntoViewIfNeeded();
     await expect(page.getByTestId("profile-preview").filter({ visible: true })).toBeInViewport();
