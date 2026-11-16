@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { AppHeader } from "@/components/app-header";
+import { AppShell } from "@/components/app-shell";
 import { ProfileStatusBadge } from "@/components/profile-status-badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,8 +25,7 @@ async function Profiles() {
   const [profiles, max] = await Promise.all([listProfiles(user.id), getSetting("profiles.maxPerUser")]);
   const atLimit = profiles.length >= max;
   return (
-    <>
-      <AppHeader user={user} />
+    <AppShell user={user} current="profiles">
       <main className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-8 sm:px-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Profiles</h1>
@@ -75,6 +74,6 @@ async function Profiles() {
           <CreateProfileForm disabledReason={atLimit ? `You've reached the limit of ${max} profiles.` : undefined} />
         </section>
       </main>
-    </>
+    </AppShell>
   );
 }

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { AppHeader } from "@/components/app-header";
+import { AppShell } from "@/components/app-shell";
 import { ProfileStatusBadge } from "@/components/profile-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,8 +31,7 @@ async function Dashboard({ searchParams }: Pick<PageProps<"/dashboard">, "search
   const user = await requireUser();
   const { denied } = await searchParams;
   return (
-    <>
-      <AppHeader user={user} />
+    <AppShell user={user}>
       <main className="mx-auto grid w-full max-w-4xl gap-6 px-4 py-8 sm:px-6">
         {denied && (
           <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -65,7 +64,7 @@ async function Dashboard({ searchParams }: Pick<PageProps<"/dashboard">, "search
         </section>
         <ActiveProfileCard userId={user.id} />
       </main>
-    </>
+    </AppShell>
   );
 }
 

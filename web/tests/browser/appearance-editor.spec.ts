@@ -378,11 +378,20 @@ test("draft appearance stays private, discard restores the published one, and a 
   await other.close();
 });
 
-test("the dashboard's color mode doesn't change the profile preview", async ({ page }) => {
+test("the dashboard's color mode doesn't change the profile preview", async ({ page, context, baseURL }) => {
+  await page.emulateMedia({ colorScheme: "light" });
   await openEditor(page);
   const light = await themedStyles(previewRoot(page));
+  // The real mechanism: the dashboard's color mode cookie, with a dark operating system as well.
+  await context.addCookies([{ name: "covalink_color_mode", value: "dark", url: baseURL! }]);
   await page.emulateMedia({ colorScheme: "dark" });
-  await page.evaluate(() => document.documentElement.classList.add("dark"));
+  await openEditor(page);
+  await expect(page.locator(".cl-scope[data-color-mode=dark]")).toHaveCount(1);
+  expect(await themedStyles(previewRoot(page))).toEqual(light);
+  // Following the system (no stored choice) leaves it alone too.
+  await context.clearCookies({ name: "covalink_color_mode" });
+  await openEditor(page);
+  await expect(page.locator(".cl-scope[data-color-mode=system]")).toHaveCount(1);
   expect(await themedStyles(previewRoot(page))).toEqual(light);
 });
 

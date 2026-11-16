@@ -117,7 +117,7 @@ test("desktop: focused shell, three sections and save/publish states", async ({ 
   editorUrl = page.url();
   await page.locator("[data-hydrated]").waitFor();
 
-  // The quiet rail replaces AppHeader on this route only.
+  // The quiet rail marks the section the editor belongs to.
   const rail = page.getByRole("navigation", { name: "Main" });
   await expect(rail.getByRole("link", { name: "Profiles" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("button", { name: "Workspace menu" })).toBeHidden();

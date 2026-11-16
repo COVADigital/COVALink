@@ -1,4 +1,4 @@
-/** Workspace destinations for the focused editor shell. Plain data, so server and client can both use it. */
+/** Workspace destinations for the dashboard shell and the editor. Plain data, so server and client can both use it. */
 export interface WorkspaceLink {
   href: string;
   label: string;

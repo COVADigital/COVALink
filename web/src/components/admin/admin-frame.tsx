@@ -1,13 +1,13 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { AppHeader } from "@/components/app-header";
+import { AppShell } from "@/components/app-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { can, type Capability } from "@/lib/auth/permissions";
 import type { CurrentUser } from "@/lib/auth/session";
 
 /**
  * Shared shell of the administration pages: a skip link, the
- * dashboard header, the admin section navigation and the main landmark. The
+ * dashboard shell, the admin section navigation and the main landmark. The
  * navigation shows only sections the user's role can open; every page also
  * enforces its own capability, and every service enforces it again.
  */
@@ -32,29 +32,30 @@ export function AdminFrame({ user, section, children }: { user: CurrentUser; sec
       >
         Skip to main content
       </a>
-      <AppHeader user={user} />
-      <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-6 sm:px-6 sm:py-8">
-        <nav aria-label="Administration" className="-mx-1 overflow-x-auto">
-          <ul className="flex min-w-max gap-1 px-1">
-            {SECTIONS.filter((s) => can(user.role, s.capability)).map((s) => (
-              <li key={s.id}>
-                <Link
-                  href={s.href}
-                  aria-current={s.id === section ? "page" : undefined}
-                  className={`inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-9 ${
-                    s.id === section ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                >
-                  {s.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
-        <main id="main" tabIndex={-1} className="grid min-w-0 gap-6 outline-none">
-          {children}
-        </main>
-      </div>
+      <AppShell user={user} current="admin">
+        <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-6 sm:px-6 sm:py-8">
+          <nav aria-label="Administration" className="-mx-1 overflow-x-auto">
+            <ul className="flex min-w-max gap-1 px-1">
+              {SECTIONS.filter((s) => can(user.role, s.capability)).map((s) => (
+                <li key={s.id}>
+                  <Link
+                    href={s.href}
+                    aria-current={s.id === section ? "page" : undefined}
+                    className={`inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-9 ${
+                      s.id === section ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                  >
+                    {s.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          <main id="main" tabIndex={-1} className="grid min-w-0 gap-6 outline-none">
+            {children}
+          </main>
+        </div>
+      </AppShell>
     </>
   );
 }
