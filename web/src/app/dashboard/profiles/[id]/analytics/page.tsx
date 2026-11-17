@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { AppHeader } from "@/components/app-header";
+import { AppShell } from "@/components/app-shell";
 import {
   BreakdownTable,
   DailyTable,
@@ -51,8 +51,7 @@ async function Analytics({ params, searchParams }: Pick<PageProps<"/dashboard/pr
     if (err instanceof AppError && err.code === "NOT_FOUND") notFound();
     logger.error({ err, userId: user.id }, "Loading analytics failed");
     return (
-      <>
-        <AppHeader user={user} />
+      <AppShell user={user} current="analytics">
         <main className="mx-auto grid w-full max-w-5xl gap-4 px-4 py-8 sm:px-6">
           <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
           <div role="alert" className="grid gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-5 text-sm" data-testid="analytics-error">
@@ -62,7 +61,7 @@ async function Analytics({ params, searchParams }: Pick<PageProps<"/dashboard/pr
             </Button>
           </div>
         </main>
-      </>
+      </AppShell>
     );
   }
 
@@ -71,8 +70,7 @@ async function Analytics({ params, searchParams }: Pick<PageProps<"/dashboard/pr
   const showVisitors = totals.visitorAvailability === "approximate" || totals.visitorAvailability === "partial";
   const qrUrl = qrTargetUrl(env().APP_URL, profile.handle);
   return (
-    <>
-      <AppHeader user={user} profileId={profile.id} />
+    <AppShell user={user} profileId={profile.id} current="analytics">
       <main className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-8 sm:px-6">
         <div className="grid gap-1">
           <Link href={`/dashboard/profiles/${profile.id}`} className="w-fit text-sm text-muted-foreground underline-offset-4 hover:underline">
@@ -158,7 +156,7 @@ async function Analytics({ params, searchParams }: Pick<PageProps<"/dashboard/pr
           counted. Visitors without JavaScript aren&apos;t counted as views. No cookies, IP addresses or browser details are stored.
         </p>
       </main>
-    </>
+    </AppShell>
   );
 }
 

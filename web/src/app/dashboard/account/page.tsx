@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { AccountNameForm } from "@/components/account/account-name-form";
 import { ChangePasswordForm } from "@/components/account/change-password-form";
 import { DeleteAccount } from "@/components/account/delete-account";
-import { AppHeader } from "@/components/app-header";
+import { AppShell } from "@/components/app-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireUser } from "@/lib/auth/session";
 
@@ -26,8 +26,7 @@ const BLOCKED: Record<string, string> = {
 async function Account() {
   const user = await requireUser();
   return (
-    <>
-      <AppHeader user={user} />
+    <AppShell user={user} current="account">
       <main className="mx-auto grid w-full max-w-2xl gap-6 px-4 py-8 sm:px-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Account</h1>
@@ -62,7 +61,7 @@ async function Account() {
           <DeleteAccount blockedReason={BLOCKED[user.role] ?? null} />
         </section>
       </main>
-    </>
+    </AppShell>
   );
 }
 

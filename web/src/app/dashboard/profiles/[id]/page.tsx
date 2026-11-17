@@ -46,7 +46,7 @@ async function Editor({ params }: Pick<PageProps<"/dashboard/profiles/[id]">, "p
   // As in the dashboard header: the profile being edited is shown as active and remembered.
   const { active, all, sync } = await getActiveProfile(user.id, profile.id);
   const links = workspaceLinks(can(user.role, "admin.access"), active?.id ?? null);
-  // The focused editor shell is local to this route; other pages keep AppHeader.
+  // The editor builds its own shell (its top bar holds Save/Publish); other pages use AppShell.
   return (
     <div className="editor-scope flex min-h-dvh flex-1">
       <WorkspaceRail links={links} current="profiles" />

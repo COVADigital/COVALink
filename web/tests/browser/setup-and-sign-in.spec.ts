@@ -91,7 +91,8 @@ test("valid login shows the dashboard identity, survives reload, and logs out", 
   await page.reload();
   await expect(page.getByTestId("user-email")).toContainText(OWNER.email);
 
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
   await expect(page).toHaveURL(/\/login/);
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/login/);
@@ -131,7 +132,8 @@ test.describe("mobile viewport", () => {
     await signIn(page, MEMBER.email, MEMBER.password);
     await expect(page).toHaveURL(/\/dashboard$/);
     expect(await noOverflow()).toBe(true);
-    await expect(page.getByRole("button", { name: "Sign out" })).toBeInViewport();
+    // Below 75rem every destination and sign-out sit in the top-bar menu.
+    await expect(page.getByRole("button", { name: "Workspace menu" })).toBeInViewport();
     await expect(page.getByTestId("user-email")).toBeVisible();
   });
 });

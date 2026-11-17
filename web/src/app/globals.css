@@ -2,7 +2,17 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/* Dashboard color mode: an explicit dark choice, or "system" while the OS prefers dark. */
+@custom-variant dark {
+  &:where([data-color-mode="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where([data-color-mode="system"] *) {
+      @slot;
+    }
+  }
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -107,7 +117,8 @@
   --sidebar-ring: oklch(0.708 0 0);
 
   /*
-   * COVALink semantic dashboard tokens. Light only; dark mode is deferred.
+   * COVALink semantic dashboard tokens, light values. The dark values are set
+   * below, only where a color mode is active (the dashboard and admin routes).
    * They style the dashboard, never a public profile: themes keep their own
    * --pp-* properties and contrast rules.
    */
@@ -132,10 +143,15 @@
 }
 
 /*
- * The focused editor shell maps the shadcn variables onto the COVALink
- * tokens for its own subtree only; other dashboard pages keep the default look.
+ * The dashboard scope (ColorModeScope, rendered by the dashboard and admin
+ * layouts) maps the shadcn variables onto the COVALink tokens for its own
+ * subtree only, so auth and public pages keep their own look. The same
+ * mapping applies to <html> while a color mode is set, so portalled menus,
+ * dialogs and toasts follow the dashboard theme too.
  */
-.editor-scope {
+.cl-scope,
+:root[data-color-mode] {
+  color-scheme: light;
   --background: var(--cl-canvas);
   --foreground: var(--cl-ink);
   --card: var(--cl-surface);
@@ -158,11 +174,63 @@
   background: var(--cl-canvas);
   color: var(--cl-ink);
 }
-.editor-scope ::selection {
+.cl-scope ::selection,
+:root[data-color-mode] ::selection {
   background: color-mix(in oklch, var(--cl-accent) 22%, transparent);
 }
+/* Dark values for an explicit choice. */
+.cl-scope[data-color-mode="dark"],
+:root[data-color-mode="dark"] {
+  color-scheme: dark;
+  --cl-canvas: oklch(0.17 0.012 230);
+  --cl-surface: oklch(0.21 0.014 230);
+  --cl-inset: oklch(0.255 0.015 230);
+  --cl-ink: oklch(0.95 0.006 210);
+  --cl-ink-2: oklch(0.77 0.015 220);
+  --cl-line: oklch(0.31 0.015 230);
+  --cl-line-strong: oklch(0.62 0.016 220);
+  --cl-accent: oklch(0.74 0.1 195);
+  --cl-accent-ink: oklch(0.18 0.03 220);
+  --cl-danger: oklch(0.72 0.15 25);
+  --cl-danger-wash: oklch(0.26 0.045 25);
+  --cl-warn: oklch(0.8 0.12 80);
+  --cl-warn-wash: oklch(0.27 0.045 75);
+  --cl-ok: oklch(0.78 0.12 155);
+  --cl-ok-wash: oklch(0.26 0.04 155);
+}
+/* Intentionally the same values as the block above: CSS can't share them across a media query. Keep both identical. */
+@media (prefers-color-scheme: dark) {
+  .cl-scope[data-color-mode="system"],
+  :root[data-color-mode="system"] {
+    color-scheme: dark;
+    --cl-canvas: oklch(0.17 0.012 230);
+    --cl-surface: oklch(0.21 0.014 230);
+    --cl-inset: oklch(0.255 0.015 230);
+    --cl-ink: oklch(0.95 0.006 210);
+    --cl-ink-2: oklch(0.77 0.015 220);
+    --cl-line: oklch(0.31 0.015 230);
+    --cl-line-strong: oklch(0.62 0.016 220);
+    --cl-accent: oklch(0.74 0.1 195);
+    --cl-accent-ink: oklch(0.18 0.03 220);
+    --cl-danger: oklch(0.72 0.15 25);
+    --cl-danger-wash: oklch(0.26 0.045 25);
+    --cl-warn: oklch(0.8 0.12 80);
+    --cl-warn-wash: oklch(0.27 0.045 75);
+    --cl-ok: oklch(0.78 0.12 155);
+    --cl-ok-wash: oklch(0.26 0.04 155);
+  }
+}
+/* The editor preview shows the public page as visitors see it, in either dashboard mode. */
+.cl-scope .pp-root {
+  color-scheme: light;
+}
+.editor-scope .pp-root,
+:root[data-color-mode] .editor-scope .pp-root {
+  --cl-accent: oklch(0.47 0.09 200);
+  --cl-accent-ink: oklch(0.99 0 0);
+}
 /*
- * Target sizes in the editor shell: 40 px on desktop, 44 px below 75rem,
+ * Target sizes in the editor shell only: 40 px on desktop, 44 px below 75rem,
  * where touch is likely. Switches keep their look and grow their hit area.
  * Unlayered on purpose: these minimums must win over component utilities
  * (`h-8`, `after:-inset-y-2`). `asChild` triggers carry their own data-slot.
@@ -204,39 +272,6 @@
   }
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
 
 @layer base {
   * {

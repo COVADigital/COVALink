@@ -284,12 +284,15 @@ test("phone width: confirmation dialogs have 44 px buttons, readable destructive
   const settle = () => dialog.evaluate((d) => Promise.all(d.getAnimations({ subtree: true }).map((a) => a.finished)).then(() => undefined));
   const contrastBothThemes = async (name: string) => {
     await page.mouse.move(0, 0); // no hover tint
+    // No stored choice, so the dashboard follows the operating system: the same dark theme a person gets from System.
+    await page.emulateMedia({ colorScheme: "light" });
     await settle();
     const light = await dialogButtonContrast(page, name);
-    await page.evaluate(() => document.documentElement.classList.add("dark"));
+    await page.emulateMedia({ colorScheme: "dark" });
     await settle();
+    expect(await page.evaluate(() => document.documentElement.getAttribute("data-color-mode"))).toBe("system");
     const dark = await dialogButtonContrast(page, name);
-    await page.evaluate(() => document.documentElement.classList.remove("dark"));
+    await page.emulateMedia({ colorScheme: "light" });
     await settle();
     console.log(`[admin contrast] ${name}: light ${light.toFixed(2)}:1, dark ${dark.toFixed(2)}:1`); // recorded in the run log
     return { light, dark };

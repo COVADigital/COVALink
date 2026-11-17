@@ -1,25 +1,31 @@
 "use client";
 
-import { ChartLine, LayoutGrid, LogOut, Menu, Shield, User, type LucideIcon } from "lucide-react";
+import { ChartLine, LayoutGrid, LogOut, Menu, Monitor, Moon, Shield, Sun, User, type LucideIcon } from "lucide-react";
 import Link from "next/link";
+import { useState, useTransition } from "react";
 import { useSignOut } from "@/components/auth/sign-out-button";
+import { useColorMode } from "@/components/color-mode";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { setColorModeAction } from "@/features/color-mode/actions";
+import { parseColorMode, type ColorMode } from "@/features/color-mode/mode";
 import type { WorkspaceLink } from "./workspace-links";
 
 export type { WorkspaceLink };
 
 /*
- * Workspace navigation inside the focused editor shell. On desktop a
+ * Workspace navigation for the editor and the dashboard shell. On desktop a
  * quiet icon rail; below 75rem the same destinations sit in a menu in the top
- * bar. Only the editor route uses it; other pages keep AppHeader.
+ * bar.
  */
 
 const ICONS: Record<WorkspaceLink["icon"], LucideIcon> = { profiles: LayoutGrid, analytics: ChartLine, account: User, admin: Shield };
@@ -34,11 +40,17 @@ function Mark() {
   );
 }
 
+const THEMES: { value: ColorMode; label: string; Icon: LucideIcon }[] = [
+  { value: "system", label: "System", Icon: Monitor },
+  { value: "light", label: "Light", Icon: Sun },
+  { value: "dark", label: "Dark", Icon: Moon },
+];
+
 const railItem =
   "relative grid size-10 place-items-center rounded-cl-md text-cl-ink-2 outline-none hover:bg-cl-inset hover:text-cl-ink focus-visible:ring-2 focus-visible:ring-cl-accent";
 
-/** Desktop icon rail. `current` marks the section the editor belongs to. */
-export function WorkspaceRail({ links, current }: { links: WorkspaceLink[]; current: WorkspaceLink["icon"] }) {
+/** Desktop icon rail. `current` marks the section the page belongs to, if any. */
+export function WorkspaceRail({ links, current }: { links: WorkspaceLink[]; current?: WorkspaceLink["icon"] }) {
   return (
     <nav
       aria-label="Main"
@@ -77,6 +89,19 @@ export function WorkspaceRail({ links, current }: { links: WorkspaceLink[]; curr
 /** Below 75rem: every destination plus sign-out. On the rail: sign-out only. */
 export function WorkspaceMenu({ links, label = "Workspace menu", className }: { links: WorkspaceLink[]; label?: string; className?: string }) {
   const { signOut, pending, failed } = useSignOut();
+  const mode = useColorMode();
+  const [, startTransition] = useTransition();
+  const [themeFailed, setThemeFailed] = useState(false);
+  const chooseTheme = (value: string) =>
+    startTransition(async () => {
+      setThemeFailed(false);
+      try {
+        const r = await setColorModeAction(parseColorMode(value));
+        if (!r.ok) setThemeFailed(true); // on success Next re-renders the route with the new cookie
+      } catch {
+        setThemeFailed(true);
+      }
+    });
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -102,6 +127,21 @@ export function WorkspaceMenu({ links, label = "Workspace menu", className }: { 
             <DropdownMenuSeparator />
           </>
         )}
+        <DropdownMenuLabel>Dashboard theme</DropdownMenuLabel>
+        <DropdownMenuRadioGroup aria-label="Dashboard theme" value={mode} onValueChange={chooseTheme}>
+          {THEMES.map(({ value, label, Icon }) => (
+            <DropdownMenuRadioItem key={value} value={value} className="min-h-11 ed-lg:min-h-9" onSelect={(e) => e.preventDefault()}>
+              <Icon aria-hidden="true" />
+              {label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        {themeFailed && (
+          <p role="alert" className="px-2 py-1.5 text-xs text-destructive">
+            Couldn&apos;t change the theme. Try again.
+          </p>
+        )}
+        <DropdownMenuSeparator />
         <DropdownMenuItem className="min-h-11 ed-lg:min-h-9" disabled={pending}
           onSelect={(e) => {
             e.preventDefault(); // stay open so a failure is shown here

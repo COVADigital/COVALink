@@ -117,7 +117,7 @@ function Choice({
         id={id}
         value={item.values[field]}
         onChange={(e) => onChange(field, e.target.value)}
-        className="h-11 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-10 dark:bg-input/30"
+        className="h-11 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-10"
       >
         {options.map(([value, text]) => (
           <option key={value} value={value}>
@@ -314,7 +314,7 @@ function SocialEditor({ item, errors, onChange, onBlur, socialRows: rows }: Bloc
                       id={platformId}
                       value={row.platform}
                       onChange={(e) => rows.change(index, "platform", e.target.value)}
-                      className="h-11 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-10 dark:bg-input/30"
+                      className="h-11 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-10"
                     >
                       {PLATFORM_OPTIONS.map(([value, text]) => (
                         <option key={value} value={value}>

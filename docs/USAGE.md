@@ -9,6 +9,10 @@ This guide is for people who use a COVALink installation: profile owners, and th
 - **Forgotten password:** `/forgot-password` sends a reset link that works once, within an hour. The page shows the same message whether or not the address has an account. If the installation has no email delivery, it tells you to ask an administrator.
 - **Your account page** (`/dashboard/account`): change your display name or password. Changing the password signs out your other devices unless you choose otherwise. You can also delete your account here, which needs your password and a typed confirmation, and removes your profiles and uploaded images. Administrators can't delete their own account until they're demoted.
 
+## Dashboard theme
+
+Choose **System**, **Light** or **Dark** for the dashboard and administration pages in the account menu (the menu button in the rail or the top bar). The choice is stored in a cookie on that device, so it isn't shared between your devices. Public profiles and the sign-in pages are not affected. On a self-hosted installation served over plain HTTP the browser doesn't keep the cookie, so the choice falls back to System.
+
 ## Profiles
 
 Each account can have several profiles, up to the limit the administrator sets (five by default). Each profile has a **handle**, and its public page is `https://<domain>/<handle>`.
