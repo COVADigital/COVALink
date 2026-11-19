@@ -7,6 +7,8 @@ import { envSchema } from "@/lib/env";
 
 const createTransport = vi.hoisted(() => vi.fn(() => ({ sendMail: vi.fn(async () => ({})) })));
 vi.mock("nodemailer", () => ({ default: { createTransport } }));
+// Spawning git and re-importing modules can exceed the 5 s default under full-suite load.
+vi.setConfig({ testTimeout: 30_000 });
 
 /** Deployment readiness: what a real host or Coolify depends on. */
 const ROOT = path.resolve(import.meta.dirname, "../../..");
