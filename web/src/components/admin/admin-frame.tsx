@@ -24,6 +24,7 @@ const SECTIONS: { id: AdminSection; href: string; label: string; capability: Cap
 export { DESTRUCTIVE_OUTLINE, TOUCH } from "./styles";
 
 export function AdminFrame({ user, section, children }: { user: CurrentUser; section: AdminSection; children: ReactNode }) {
+  const allowed = SECTIONS.filter((s) => can(user.role, s.capability));
   return (
     <>
       <a
@@ -32,11 +33,16 @@ export function AdminFrame({ user, section, children }: { user: CurrentUser; sec
       >
         Skip to main content
       </a>
-      <AppShell user={user} current="admin">
+      <AppShell
+        user={user}
+        current="admin"
+        sub={allowed.map((s) => ({ href: s.href, label: s.label, current: s.id === section }))}
+      >
         <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-6 sm:px-6 sm:py-8">
-          <nav aria-label="Administration" className="-mx-1 overflow-x-auto">
+          {/* Below 75rem; from there the sidebar lists the same pages under Administration. */}
+          <nav aria-label="Administration" className="-mx-1 overflow-x-auto ed-lg:hidden">
             <ul className="flex min-w-max gap-1 px-1">
-              {SECTIONS.filter((s) => can(user.role, s.capability)).map((s) => (
+              {allowed.map((s) => (
                 <li key={s.id}>
                   <Link
                     href={s.href}

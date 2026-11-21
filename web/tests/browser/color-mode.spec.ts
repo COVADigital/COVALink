@@ -287,9 +287,20 @@ test("every element on a dashboard page is inside the color scope, on load and a
   await expect(scope(page)).toHaveAttribute("data-color-mode", "dark");
   expect(await escaped(), "after a full load").toEqual([]);
 
-  for (const link of ["Profiles", "Account", "Analytics"]) {
-    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: link }).click();
-    await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: link })).toHaveAttribute("aria-current", "page");
+  // The sidebar stays on every destination; Account settings swaps in its own, which is last.
+  for (const [link, sidebar] of [["Profiles", "Main"], ["Analytics", "Main"], ["Account", "Account settings"]]) {
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: link, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(link === "Profiles" ? "/dashboard/profiles$" : link === "Analytics" ? "/analytics$" : "/dashboard/account$"));
+    const nav = page.getByRole("navigation", { name: sidebar });
+    await expect(nav).toBeVisible();
+    // Exactly one place is marked current: the Profiles item itself, the analytics profile under Analytics, or the first account section.
+    await expect(nav.locator("[aria-current]")).toHaveCount(1);
+    if (link === "Profiles") await expect(nav.getByRole("link", { name: "Profiles", exact: true })).toHaveAttribute("aria-current", "page");
+    if (link === "Analytics") {
+      await expect(nav.getByRole("link", { name: "Analytics", exact: true })).not.toHaveAttribute("aria-current");
+      await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
+    }
+    if (link === "Account") await expect(nav.getByRole("link", { name: "Personal" })).toHaveAttribute("aria-current", "location");
     await expect(scope(page)).toHaveAttribute("data-color-mode", "dark");
     expect(await page.evaluate(() => performance.getEntriesByType("navigation").length), "still one document").toBe(1);
     expect(await escaped(), `after navigating to ${link}`).toEqual([]);

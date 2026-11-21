@@ -110,8 +110,9 @@ test("a header link asks first: Keep editing keeps every edit, Leave without sav
   await expect(page.getByRole("heading", { level: 1, name: "Account" })).toBeVisible();
 
   // Coming back in the same session (Next.js may reuse the hidden page) shows the saved draft, not the discarded edits.
-  await headerLink(page, "Profiles").click();
-  await page.getByTestId("profile-row").filter({ visible: true }).filter({ hasText: "/drafts-main" }).getByRole("link", { name: "Edit" }).click();
+  // The account page lists owned profiles; each has a menu with "Edit profile".
+  await page.getByRole("button", { name: "Actions for Main" }).click();
+  await page.getByRole("menuitem", { name: "Edit profile" }).click();
   await expect(page).toHaveURL(mainUrl);
   await expect(page.locator("#bio")).toHaveValue("");
   await page.getByRole("tab", { name: "Profile" }).filter({ visible: true }).click();

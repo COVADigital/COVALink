@@ -298,6 +298,14 @@ describe("public visibility and cache invalidation across lifecycle events", () 
     expect((await publicView("alice"))?.live.ownerId).toBe(bob);
   });
 
+  it("a handle-only change keeps the stored label", async () => {
+    const id = await published(alice, "alice-solo");
+    await svc.updateProfileMeta(alice, id, { handle: "alice-solo", label: "Renamed elsewhere" });
+    const r = await svc.updateProfileMeta(alice, id, { handle: "alice-solo-2" });
+    expect(r.handle).toBe("alice-solo-2");
+    expect((await svc.getOwnedProfile(alice, id)).label).toBe("Renamed elsewhere");
+  });
+
   it("ban hides every profile of the owner at once and evicts owner, profile and handle tags; unban restores", async () => {
     const a1 = await published(alice, "alice");
     const a2 = await published(alice, "alice-two");

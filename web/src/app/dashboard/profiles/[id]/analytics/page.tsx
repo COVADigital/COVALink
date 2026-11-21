@@ -14,10 +14,12 @@ import {
   StatCards,
 } from "@/components/analytics/analytics-panels";
 import { DailyChart } from "@/components/analytics/daily-chart";
+import { profileLinks } from "@/components/section-links";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { qrFileName, qrTargetUrl } from "@/features/analytics/qr";
 import { getProfileAnalytics, type ProfileAnalytics } from "@/features/analytics/service";
+import { listOwnedProfiles } from "@/features/profiles/active";
 import { requireUser } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 import { AppError } from "@/lib/errors";
@@ -69,8 +71,9 @@ async function Analytics({ params, searchParams }: Pick<PageProps<"/dashboard/pr
   const basePath = `/dashboard/profiles/${profile.id}/analytics`;
   const showVisitors = totals.visitorAvailability === "approximate" || totals.visitorAvailability === "partial";
   const qrUrl = qrTargetUrl(env().APP_URL, profile.handle);
+  const sub = profileLinks(await listOwnedProfiles(user.id), (pid) => `/dashboard/profiles/${pid}/analytics`, profile.id);
   return (
-    <AppShell user={user} profileId={profile.id} current="analytics">
+    <AppShell user={user} profileId={profile.id} current="analytics" sub={sub}>
       <main className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-8 sm:px-6">
         <div className="grid gap-1">
           <Link href={`/dashboard/profiles/${profile.id}`} className="w-fit text-sm text-muted-foreground underline-offset-4 hover:underline">
