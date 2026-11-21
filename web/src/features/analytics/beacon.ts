@@ -64,7 +64,7 @@ export async function handleViewBeacon(request: Request, deps: Partial<BeaconDep
 }
 
 /** The body as text, or null when it exceeds `max` bytes (reading stops there). */
-async function readBounded(request: Request, max: number): Promise<string | null> {
+export async function readBounded(request: Request, max: number): Promise<string | null> {
   if (!request.body) return "";
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];

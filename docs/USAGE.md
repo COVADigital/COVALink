@@ -50,6 +50,7 @@ The page is a list of blocks. Add a block, edit it, then reorder it with drag an
 | Image | One of your uploaded images, with alternative text, an optional caption and an optional link |
 | Video | A YouTube or Vimeo video |
 | Music | A Spotify track, album, playlist, artist, episode or show, or a SoundCloud track or playlist |
+| Subscribe | An email sign-up form with a title, an optional description and a button label ([Audience](#audience)) |
 
 **Links** must be `http` or `https` addresses. Addresses without a scheme, such as `example.com`, are saved as `https`.
 
@@ -82,13 +83,25 @@ Each profile has an **Analytics** page, visible only to you, with views, clicks 
 
 The analytics page also offers a **QR code** for the profile, as an SVG download. If you change the profile's handle, download a new code: the old one points to the old address.
 
+## Audience
+
+Each profile has an **Audience** page listing the people who signed up through its Subscribe block.
+
+- **Double opt-in:** a visitor enters their address and gets an email with a confirmation link. They appear as a contact only after confirming. Unconfirmed sign-ups show as Pending, stop working after 48 hours, and are then removed.
+- **Consent:** the form shows a fixed line saying the visitor shares their email with you and can remove it at any time. That wording is saved with each contact.
+- **Removal:** every confirmation email has a link that removes the address. You can also delete any contact from the Audience page.
+- **Export:** **Export CSV** downloads your confirmed contacts (email, confirmation time and the consent wording). COVALink doesn't send newsletters; use the file with your own email tool.
+- **Email is required:** sign-ups are confirmed by email, so the Subscribe block isn't shown to visitors while the installation has no email configured, while the server can't tell visitors apart (the administrator hasn't set `TRUST_PROXY`, see [Deployment](DEPLOYMENT.md#trust_proxy)), or while the administrator has turned Subscribe blocks off. The dashboard says so on the Audience page and in the block's editor. Existing contacts are kept either way.
+- **Verify your email first:** a profile collects sign-ups only while its owner's email address is verified. If yours isn't, the Audience page and the block's editor say so, and **Account → Send verification link** emails you a link.
+- Deleting a profile deletes its contacts.
+
 ## Administration
 
 Administrators see **Admin** in the dashboard (`/admin`).
 
 - **Overview:** the installation's status: the version, whether the database and image storage are working, the number of applied migrations, whether email is configured, and the analytics retention.
 - **Users:** search and filter accounts and open an account to see its profiles. Administrators can disable or re-enable ordinary users; disabling signs the user out everywhere and takes their profiles offline. Only the super administrator can make a user an administrator or remove administrator rights. Nobody can change their own account here.
-- **Settings:** the site name, profiles per account, image storage and upload limits, and analytics retention. Registration settings (public sign-up and invite-only mode) can be changed only by the super administrator. Invite-only mode closes registration completely, because invitations aren't implemented.
+- **Settings:** the site name, profiles per account, image storage and upload limits, analytics retention, and whether Subscribe blocks are allowed. Registration settings (public sign-up and invite-only mode) can be changed only by the super administrator. Invite-only mode closes registration completely, because invitations aren't implemented.
 - **Audit log:** every administrative and sensitive account change, newest first, with who made it and when.
 
 Email delivery is configured by the installation's operator through environment variables, not in the admin pages ([EMAIL_DELIVERY.md](EMAIL_DELIVERY.md)).

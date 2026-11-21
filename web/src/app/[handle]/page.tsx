@@ -5,6 +5,7 @@ import { ViewBeacon } from "@/components/profile/view-beacon";
 import { resolveHandleParam } from "@/features/profiles/handle";
 import { buildProfileMetadata } from "@/features/profiles/metadata";
 import { getLiveProfile, getPublishedDocument } from "@/features/profiles/public";
+import { ownerVerified, subscribeStatus } from "@/features/audience/status";
 import { getSetting } from "@/features/settings/service";
 import { env } from "@/lib/env";
 
@@ -42,9 +43,11 @@ export async function generateMetadata({ params }: PageProps<"/[handle]">): Prom
 
 export default async function PublicProfilePage({ params }: PageProps<"/[handle]">) {
   const { live, published } = await load((await params).handle);
+  const hasSubscribe = published.blocks.some((b) => b.type === "subscribe" && b.visible);
+  const subscribeLive = hasSubscribe && (await subscribeStatus()).live && (await ownerVerified(live.ownerId));
   return (
     <>
-      <ProfileView document={published} verified={live.verified} mode="public" clickTrackingProfileId={live.id} />
+      <ProfileView document={published} verified={live.verified} mode="public" clickTrackingProfileId={live.id} subscribeLive={subscribeLive} />
       {/* Analytics: one view beacon after hydration; link blocks go through /go. */}
       <ViewBeacon profileId={live.id} />
     </>

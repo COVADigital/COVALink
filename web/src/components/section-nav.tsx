@@ -8,6 +8,7 @@ import {
   Shield,
   SlidersHorizontal,
   User,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -31,6 +32,7 @@ const ICONS = {
   profiles: LayoutGrid,
   management: SlidersHorizontal,
   analytics: ChartLine,
+  audience: Users,
   account: User,
   admin: Shield,
 } satisfies Record<string, LucideIcon>;
@@ -103,7 +105,7 @@ export function WorkspaceSidebar({ links, current, sub = [], empty }: { links: W
         <Mark />
         COVALink
       </Link>
-      <ul className="grid gap-0.5 overflow-y-auto">
+      <ul className="grid grid-cols-1 gap-0.5 overflow-y-auto">
         {links.map((l) => {
           const Icon = ICONS[l.icon];
           const open = l.icon === current;
@@ -114,7 +116,7 @@ export function WorkspaceSidebar({ links, current, sub = [], empty }: { links: W
                 <span className="truncate">{l.label}</span>
               </Link>
               {open && (sub.length > 0 || empty) && (
-                <ul className="mt-0.5 grid gap-0.5">
+                <ul className="mt-0.5 grid grid-cols-1 gap-0.5">
                   {sub.length === 0 && <li className="py-1.5 pl-8 text-sm text-cl-ink-2">{empty}</li>}
                   {sub.map((s) => {
                     const cur = isCurrent(s);
@@ -150,7 +152,7 @@ export function SectionRail({ label, title, links, empty }: { label: string; tit
       </Link>
       <p className="mt-4 mb-1 px-2 text-xs font-medium text-cl-ink-2">{title}</p>
       {links.length === 0 && empty && <p className="px-2 text-sm text-cl-ink-2">{empty}</p>}
-      <ul className="grid gap-0.5 overflow-y-auto">
+      <ul className="grid grid-cols-1 gap-0.5 overflow-y-auto">
         {links.map((l) => {
           const Icon = l.icon ? ICONS[l.icon] : null;
           const current = isCurrent(l);

@@ -11,6 +11,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 import type { ProfileDocument } from "@/features/profiles/document";
@@ -221,4 +222,43 @@ export const auditLogs = pgTable(
     createdAt,
   },
   (t) => [index("audit_logs_created_at_idx").on(t.createdAt), index("audit_logs_actor_idx").on(t.actorId)],
+);
+
+/**
+ * Visitors who signed up through a profile's Subscribe block. A row starts
+ * `pending` and becomes `confirmed` through the emailed link (double opt-in);
+ * pending rows older than 48 hours are deleted on the next sign-up to any
+ * profile. Only SHA-256 hashes of the confirm and remove tokens are stored.
+ * `consent_text` keeps the wording the visitor agreed to.
+ */
+export const audienceContacts = pgTable(
+  "audience_contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    status: text("status", { enum: ["pending", "confirmed"] }).notNull(),
+    consentText: text("consent_text").notNull(),
+    // Not a foreign key: blocks live inside the profile document.
+    blockId: uuid("block_id").notNull(),
+    confirmTokenHash: text("confirm_token_hash").unique(),
+    removeTokenHash: text("remove_token_hash").notNull().unique(),
+    createdAt,
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  },
+  (t) => [
+    unique("audience_contacts_profile_email_key").on(t.profileId, t.email),
+    index("audience_contacts_profile_status_idx").on(t.profileId, t.status, t.createdAt),
+    // For the sweep of expired pending sign-ups across all profiles.
+    index("audience_contacts_pending_created_idx").on(t.createdAt).where(sql`${t.status} = 'pending'`),
+    check("audience_contacts_status_valid", sql`${t.status} in ('pending', 'confirmed')`),
+    check("audience_contacts_email_format", sql`char_length(${t.email}) <= 254 and ${t.email} = lower(${t.email})`),
+    check(
+      "audience_contacts_status_consistency",
+      sql`(${t.status} = 'pending' and ${t.confirmTokenHash} is not null and ${t.confirmedAt} is null) or (${t.status} = 'confirmed' and ${t.confirmTokenHash} is null and ${t.confirmedAt} is not null)`,
+    ),
+    check("audience_contacts_token_format", sql`${t.removeTokenHash} ~ '^[0-9a-f]{64}$' and (${t.confirmTokenHash} is null or ${t.confirmTokenHash} ~ '^[0-9a-f]{64}$')`),
+  ],
 );

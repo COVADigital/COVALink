@@ -44,6 +44,8 @@ const SETTINGS = {
     default: () => env().ANALYTICS_RETENTION_DAYS,
     capability: "settings.manage",
   },
+  // Off: the Subscribe block isn't offered, rendered or accepted. Existing contacts stay.
+  "audience.subscribeEnabled": { schema: z.boolean(), default: () => true, capability: "settings.manage" },
 } as const satisfies Record<string, { schema: z.ZodType; default: () => unknown; capability: Capability }>;
 
 export type SettingKey = keyof typeof SETTINGS;

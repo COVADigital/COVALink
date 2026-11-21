@@ -355,7 +355,7 @@
     color: var(--pp-muted, #52525b);
   }
 
-  /* Blocks: link, heading, text, divider, social, email, phone, contact, spacer, image, video and music. */
+  /* Blocks: link, heading, text, divider, social, email, phone, contact, spacer, image, video, music and subscribe. */
   .pp-blocks {
     display: flex;
     flex-direction: column;
@@ -461,6 +461,62 @@
     border-radius: var(--pp-btn-radius);
     background: var(--pp-btn-bg);
     border: 1px solid var(--pp-btn-border);
+  }
+  /* Subscribe block: the field uses the page colors; the button is a theme button. */
+  .pp-subscribe {
+    display: grid;
+    gap: 0.6rem;
+    text-align: left;
+  }
+  .pp-subscribe-title {
+    margin: 0;
+    font-family: var(--pp-font-heading, var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif);
+    font-weight: 650;
+    font-size: 1.05em;
+  }
+  .pp-subscribe-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .pp-subscribe-input {
+    flex: 1 1 12rem;
+    min-width: 0;
+    min-height: 3.25rem;
+    padding: 0 1rem;
+    border: 1px solid color-mix(in srgb, var(--pp-text, #18181b) 65%, transparent);
+    border-radius: var(--pp-btn-radius, 12px);
+    background: var(--pp-bg, #fafafa);
+    color: var(--pp-text, #18181b);
+    font: inherit;
+  }
+  .pp-subscribe-input:focus-visible,
+  .pp-subscribe .pp-btn:focus-visible {
+    outline: 2px solid var(--pp-accent, currentColor);
+    outline-offset: 2px;
+  }
+  .pp-subscribe .pp-btn {
+    flex: 0 0 auto;
+    font: inherit;
+    font-weight: 550;
+    cursor: pointer;
+  }
+  .pp-subscribe .pp-btn:disabled {
+    cursor: default;
+  }
+  .pp-subscribe-note,
+  .pp-subscribe-status {
+    margin: 0;
+    font-size: 0.85em;
+    line-height: 1.45;
+  }
+  /* Off-screen but focusable by nobody: bots fill it, people never see it. */
+  .pp-subscribe-hp {
+    position: absolute;
+    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
   }
   .pp-divider {
     width: 100%;

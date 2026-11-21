@@ -6,6 +6,7 @@ import { ACCOUNT_LINKS, type AccountSectionId } from "@/components/account/accou
 import { DeleteAccount } from "@/components/account/delete-account";
 import { OwnedProfileMenu } from "@/components/account/owned-profile-menu";
 import { PasswordRow } from "@/components/account/password-row";
+import { SendVerification } from "@/components/account/send-verification";
 import { AppShell } from "@/components/app-shell";
 import { ProfileStatusBadge } from "@/components/profile-status-badge";
 import { SectionChips, SectionRail } from "@/components/section-nav";
@@ -14,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listOwnedProfiles } from "@/features/profiles/active";
 import { requireUser } from "@/lib/auth/session";
+import { smtpConfigured } from "@/lib/env";
 
 export const metadata: Metadata = { title: "Account", robots: { index: false, follow: false } };
 
@@ -73,6 +75,7 @@ async function Account() {
                   <p id="account-email-note" className="text-sm text-cl-ink-2">
                     {user.emailVerified ? "Verified." : "Not verified."} The email address can&apos;t be changed.
                   </p>
+                  {!user.emailVerified && smtpConfigured() && <SendVerification email={user.email} />}
                 </div>
               }
             />

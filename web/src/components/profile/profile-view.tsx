@@ -65,12 +65,15 @@ export function ProfileView({
   verified,
   mode,
   clickTrackingProfileId,
+  subscribeLive,
 }: {
   document: ViewDocument;
   verified: boolean;
   mode: "public" | "preview";
   /** Public page only: routes link blocks through `/go` (RenderContext). */
   clickTrackingProfileId?: string;
+  /** Public page only: whether Subscribe blocks are shown (RenderContext). */
+  subscribeLive?: boolean;
 }) {
   const Root = mode === "public" ? "main" : "div";
   return (
@@ -84,6 +87,8 @@ export function ProfileView({
             openLinksInNewTab: document.settings.openLinksInNewTab,
             clickTrackingProfileId,
             socialStyle: document.theme.social.style,
+            displayName: document.header.displayName,
+            subscribeLive,
           }}
         />
         {document.settings.showBranding && (

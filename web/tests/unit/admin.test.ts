@@ -141,7 +141,7 @@ describe("system status vocabulary", () => {
 });
 
 describe("settings catalog", () => {
-  it("covers exactly the seven installation settings, with security flags on registration only", () => {
+  it("covers exactly the eight installation settings, with security flags on registration only", () => {
     expect(SETTING_SPECS.map((s) => s.key)).toEqual([
       "site.name",
       "registration.enabled",
@@ -150,6 +150,7 @@ describe("settings catalog", () => {
       "media.quotaMb",
       "media.uploadsPerHour",
       "analytics.retentionDays",
+      "audience.subscribeEnabled",
     ]);
     expect(SETTING_SPECS.filter((s) => s.security).map((s) => s.key)).toEqual(["registration.enabled", "registration.inviteOnly"]);
   });

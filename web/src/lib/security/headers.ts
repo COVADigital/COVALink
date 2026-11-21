@@ -74,6 +74,20 @@ export function qrResponseHeaders(fileName: string): Record<string, string> {
 }
 
 /**
+ * Headers for the owner's contacts export
+ * (`/dashboard/profiles/{id}/audience/export`), set by the route like the QR
+ * download: a CSV attachment, never sniffed, never cached.
+ */
+export function csvResponseHeaders(fileName: string): Record<string, string> {
+  return {
+    ...mediaResponseHeaders(),
+    "content-type": "text/csv; charset=utf-8",
+    "content-disposition": `attachment; filename="${fileName}"`,
+    "cache-control": "private, no-store",
+  };
+}
+
+/**
  * RFC 5987 `value-chars` for `filename*`: UTF-8 percent-encoded; `'()*` are
  * encoded too because they aren't `attr-char`s.
  */
@@ -136,14 +150,14 @@ export const PROFILE_HEADERS_SOURCE = `/:handle(${PROFILE_PATH})`;
 
 /**
  * next.config.ts path pattern for every route that gets the page headers: all
- * but media, the QR download, the token pages, the exact vCard route
+ * but media, the QR and contacts downloads, the token pages, the exact vCard route
  * (`/api/vcard`, one segment or three get the page headers) and the
  * public profile pages.
  */
-export const PAGE_HEADERS_SOURCE = `/:path((?!media/|dashboard/profiles/[^/]+/qr$|reset-password$|verify-email$|api/vcard/[^/]+/[^/]+$|${PROFILE_PATH}$).*)`;
+export const PAGE_HEADERS_SOURCE = `/:path((?!media/|dashboard/profiles/[^/]+/qr$|dashboard/profiles/[^/]+/audience/export$|reset-password$|verify-email$|subscribe/(?:confirm|remove)$|api/vcard/[^/]+/[^/]+$|${PROFILE_PATH}$).*)`;
 
 /** next.config.ts path pattern for the pages that receive a token in their link fragment. */
-export const TOKEN_PAGE_HEADERS_SOURCE = "/:page(reset-password|verify-email)";
+export const TOKEN_PAGE_HEADERS_SOURCE = "/:page(reset-password|verify-email|subscribe/confirm|subscribe/remove)";
 
 export function securityHeaders({ isDev }: { isDev: boolean }): { key: string; value: string }[] {
   return [
@@ -173,7 +187,8 @@ export function profileSecurityHeaders({ isDev }: { isDev: boolean }): { key: st
 
 /**
  * Headers for the pages that receive a reset or verification token in their
- * link fragment (`/reset-password`, `/verify-email`). They replace
+ * link fragment (`/reset-password`, `/verify-email`, `/subscribe/confirm`,
+ * `/subscribe/remove`). They replace
  * the page headers there (excluded from `PAGE_HEADERS_SOURCE`), so each
  * field appears exactly once: the page headers with `Referrer-Policy:
  * no-referrer`, plus `no-store` and `noindex`. Next.js also marks these

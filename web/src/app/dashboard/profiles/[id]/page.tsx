@@ -7,6 +7,7 @@ import { workspaceLinks } from "@/components/editor/workspace-links";
 import { WorkspaceRail } from "@/components/editor/workspace-nav";
 import { ProfileSwitcher } from "@/components/profile-switcher";
 import { Skeleton } from "@/components/ui/skeleton";
+import { subscribeStatus } from "@/features/audience/status";
 import { listMedia } from "@/features/media/service";
 import { getActiveProfile } from "@/features/profiles/active";
 import { getOwnedProfile } from "@/features/profiles/service";
@@ -45,7 +46,9 @@ async function Editor({ params }: Pick<PageProps<"/dashboard/profiles/[id]">, "p
   });
   // As in the dashboard header: the profile being edited is shown as active and remembered.
   const { active, all, sync } = await getActiveProfile(user.id, profile.id);
-  const links = workspaceLinks(can(user.role, "admin.access"), active?.id ?? null);
+  const admin = can(user.role, "admin.access");
+  const links = workspaceLinks(admin, active?.id ?? null);
+  const { emailReady, visitorsKnown, subscribeEnabled } = await subscribeStatus();
   // The editor builds its own shell (its top bar holds Save/Publish); other pages use AppShell.
   return (
     <div className="editor-scope flex min-h-dvh flex-1">
@@ -79,6 +82,7 @@ async function Editor({ params }: Pick<PageProps<"/dashboard/profiles/[id]">, "p
             />
           ) : null
         }
+        audience={{ emailReady, visitorsKnown, subscribeEnabled, admin, ownerVerified: user.emailVerified }}
         manage={
           <>
             <ProfileSettingsForm profileId={profile.id} handle={profile.handle} label={profile.label} />

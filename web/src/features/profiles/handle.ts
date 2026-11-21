@@ -9,7 +9,7 @@ export const RESERVED_HANDLES = new Set([
   "docs", "download", "explore", "favicon.ico", "features", "forgot-password", "go", "health",
   "help", "home", "invite", "legal", "login", "logout", "media", "new", "pricing", "privacy",
   "profile", "profiles", "qr", "register", "reset-password", "robots.txt", "root", "settings", "setup",
-  "signin", "signout", "signup", "sitemap.xml", "static", "status", "support", "system", "terms",
+  "signin", "signout", "signup", "sitemap.xml", "static", "status", "subscribe", "support", "system", "terms",
   "u", "uploads", "user", "users", "vcard", "verify-email", "www", "_next",
 ]);
 

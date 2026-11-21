@@ -73,9 +73,9 @@ describe("link destinations (parseLinkUrl)", () => {
 });
 
 describe("block registry", () => {
-  it("keeps every scaffolded type readable; all twelve are editable and renderable", () => {
-    expect(Object.keys(BLOCK_DEFINITIONS)).toHaveLength(12);
-    const reviewed = ["link", "heading", "text", "divider", "social", "email", "phone", "contact", "spacer", "image", "video", "music"];
+  it("keeps every scaffolded type readable; all thirteen are editable and renderable", () => {
+    expect(Object.keys(BLOCK_DEFINITIONS)).toHaveLength(13);
+    const reviewed = ["link", "heading", "text", "divider", "social", "email", "phone", "contact", "spacer", "image", "video", "music", "subscribe"];
     expect([...EDITABLE_BLOCK_TYPES]).toEqual(reviewed);
     expect([...RENDERABLE_BLOCK_TYPES]).toEqual(reviewed);
     expect(Object.keys(BLOCK_RENDERERS).sort()).toEqual([...RENDERABLE_BLOCK_TYPES].sort());

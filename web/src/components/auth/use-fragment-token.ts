@@ -14,8 +14,9 @@ export function useFragmentToken(): string | null | undefined {
     const found = tokenFromFragment(window.location.hash);
     if (window.location.hash) window.history.replaceState(window.history.state, "", window.location.pathname);
     // Reading browser-only state after hydration is this effect's purpose.
+    // A second run (React Strict Mode in development) finds the hash already removed; keep the token read first.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setToken(found);
+    setToken((prev) => found ?? prev ?? null);
   }, []);
   return token;
 }

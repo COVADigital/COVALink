@@ -36,6 +36,20 @@
       "when": 1793655373649,
       "tag": "0004_analytics",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795227221215,
+      "tag": "0005_audience",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795244482691,
+      "tag": "0006_audience_pending_index",
+      "breakpoints": true
     }
   ]
 }

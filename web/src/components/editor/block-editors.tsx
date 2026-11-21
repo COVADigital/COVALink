@@ -1,8 +1,9 @@
 "use client";
 
 import { ArrowDown, ArrowUp, Plus, Trash } from "lucide-react";
-import type { ComponentProps, ComponentType } from "react";
+import { createContext, useContext, type ComponentProps, type ComponentType } from "react";
 import { FormField } from "@/components/auth/form-field";
+import { EmailSetupNote, VerifyToCollectNote, VisitorAddressNote } from "@/components/email-setup-note";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -47,6 +48,14 @@ export const rowControlId = (blockId: string, index: number, control: "up" | "do
 export const TOUCH_TARGET = "min-h-10 max-ed-lg:min-h-11";
 export const TOUCH_ICON = "size-10 max-ed-lg:size-11";
 
+/**
+ * What the Subscribe block depends on, decided on the server: whether email
+ * works, whether the operator allows the block, whether the owner is an
+ * administrator (who gets a pointer to the fix), and whether the owner's email
+ * is verified (sign-ups need it).
+ */
+export const AudienceContext = createContext({ emailReady: true, visitorsKnown: true, subscribeEnabled: true, admin: false, ownerVerified: true });
+
 /** The field focused when a block is added. */
 export const FIRST_FIELD: Record<EditableBlockType, string> = {
   link: "title",
@@ -61,6 +70,7 @@ export const FIRST_FIELD: Record<EditableBlockType, string> = {
   image: "src",
   video: "url",
   music: "url",
+  subscribe: "title",
 };
 
 function TextArea({
@@ -528,6 +538,28 @@ const MusicEditor = embedEditor(
   "https://open.spotify.com/track/…",
 );
 
+function SubscribeEditor(props: BlockEditorProps) {
+  const { emailReady, visitorsKnown, subscribeEnabled, admin, ownerVerified } = useContext(AudienceContext);
+  return (
+    <>
+      {!emailReady && <EmailSetupNote admin={admin} />}
+      {emailReady && !visitorsKnown && <VisitorAddressNote admin={admin} />}
+      {emailReady && visitorsKnown && !subscribeEnabled && (
+        <p role="note" className="rounded-cl-md bg-cl-inset p-3 text-sm text-cl-ink-2">
+          Subscribe blocks are turned off on this server, so visitors don&apos;t see this block.
+        </p>
+      )}
+      {emailReady && visitorsKnown && subscribeEnabled && !ownerVerified && <VerifyToCollectNote />}
+      <Text {...props} field="title" label="Title" />
+      <Text {...props} field="description" label="Description (optional)" hint="One line under the title." />
+      <Text {...props} field="buttonLabel" label="Button label" />
+      <p className="text-xs text-muted-foreground">
+        Visitors confirm their address from an email before they&apos;re added. Find them under Audience.
+      </p>
+    </>
+  );
+}
+
 export const BLOCK_EDITORS: Record<EditableBlockType, ComponentType<BlockEditorProps>> = {
   link: LinkEditor,
   heading: HeadingEditor,
@@ -541,4 +573,5 @@ export const BLOCK_EDITORS: Record<EditableBlockType, ComponentType<BlockEditorP
   image: ImageEditor,
   video: VideoEditor,
   music: MusicEditor,
+  subscribe: SubscribeEditor,
 };
