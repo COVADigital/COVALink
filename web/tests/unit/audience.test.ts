@@ -46,6 +46,8 @@ describe("subscribe block", () => {
     expect(live).toContain("Join my list");
     expect(live).toContain(consentText("Alice"));
     expect(live).toContain('autoComplete="email"');
+    // Without JavaScript the browser submits natively; POST keeps the address out of the URL.
+    expect(live).toMatch(/<form[^>]*method="post"/);
     expect(live).not.toMatch(/<input[^>]*type="email"[^>]*disabled/);
     const preview = render({ ...base, mode: "preview" });
     expect(preview).toMatch(/<input[^>]*type="email"[^>]*disabled/);

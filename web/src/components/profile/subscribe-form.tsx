@@ -63,8 +63,9 @@ export function SubscribeForm({
     error: "That didn't work. Check the address and try again.",
   }[state];
 
+  // POST, so a submit without JavaScript never puts the email (or a card sign-up's details) in the URL.
   return (
-    <form className="pp-subscribe" onSubmit={submit} aria-labelledby={`${id}-title`}>
+    <form className="pp-subscribe" method="post" onSubmit={submit} aria-labelledby={`${id}-title`}>
       <p className="pp-subscribe-title" id={`${id}-title`}>
         {title}
       </p>
