@@ -9,5 +9,5 @@ export const socialClickPath = (profileId: string, blockId: string, index: numbe
 /** The view beacon endpoint (`app/api/v`). */
 export const BEACON_PATH = "/api/v";
 
-/** The query parameter QR codes add to a profile URL; its only accepted value is `qr`. */
+/** The query parameter QR codes add to a profile URL: `qr` (the Analytics QR code) or `card` (the business card). */
 export const SOURCE_PARAM = "src";

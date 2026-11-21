@@ -16,3 +16,8 @@ export const plainName = (displayName: string) =>
 export function consentText(displayName: string): string {
   return `By subscribing, you agree to share your email with ${plainName(displayName)}. You can remove it at any time.`;
 }
+
+/** The business card's share-back form: the visitor shares a name, and optionally a phone and a note, too. */
+export function cardConsentText(displayName: string): string {
+  return `By sending, you agree to share these details with ${plainName(displayName)}. You can remove them at any time.`;
+}

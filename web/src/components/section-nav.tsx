@@ -3,6 +3,7 @@
 import {
   ChartLine,
   ChevronLeft,
+  IdCard,
   KeyRound,
   LayoutGrid,
   Shield,
@@ -33,6 +34,7 @@ const ICONS = {
   management: SlidersHorizontal,
   analytics: ChartLine,
   audience: Users,
+  card: IdCard,
   account: User,
   admin: Shield,
 } satisfies Record<string, LucideIcon>;

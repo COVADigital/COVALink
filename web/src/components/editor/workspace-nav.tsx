@@ -1,6 +1,6 @@
 "use client";
 
-import { ChartLine, LayoutGrid, LogOut, Menu, Monitor, Moon, Shield, Sun, User, Users, type LucideIcon } from "lucide-react";
+import { ChartLine, IdCard, LayoutGrid, LogOut, Menu, Monitor, Moon, Shield, Sun, User, Users, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useSignOut } from "@/components/auth/sign-out-button";
@@ -28,7 +28,7 @@ export type { WorkspaceLink };
  * bar.
  */
 
-const ICONS: Record<WorkspaceLink["icon"], LucideIcon> = { profiles: LayoutGrid, analytics: ChartLine, audience: Users, account: User, admin: Shield };
+const ICONS: Record<WorkspaceLink["icon"], LucideIcon> = { profiles: LayoutGrid, analytics: ChartLine, audience: Users, card: IdCard, account: User, admin: Shield };
 
 export function Mark() {
   return (

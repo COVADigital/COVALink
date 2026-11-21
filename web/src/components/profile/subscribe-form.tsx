@@ -8,6 +8,8 @@ import { SUBSCRIBE_PATH } from "@/features/audience/consent";
  * profile and block ids; every accepted request gets the same answer, so the
  * page never reveals whether an address was already on the list. The hidden
  * `website` field is a honeypot. In the editor preview the form is inert.
+ * Without a `blockId` it is the business card's share-back form, which also
+ * asks for a name and, optionally, a phone number and a note.
  */
 export function SubscribeForm({
   profileId,
@@ -19,7 +21,8 @@ export function SubscribeForm({
   inert = false,
 }: {
   profileId?: string;
-  blockId: string;
+  /** A Subscribe block's id; without one, the business card's form (name and email). */
+  blockId?: string;
   title: string;
   description?: string;
   buttonLabel: string;
@@ -27,6 +30,9 @@ export function SubscribeForm({
   inert?: boolean;
 }) {
   const id = useId();
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [note, setNote] = useState("");
   const [email, setEmail] = useState("");
   const [hp, setHp] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "done" | "error" | "busy">("idle");
@@ -39,7 +45,7 @@ export function SubscribeForm({
       const res = await fetch(SUBSCRIBE_PATH, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ p: profileId, b: blockId, email: email.trim(), hp }),
+        body: JSON.stringify({ p: profileId, ...(blockId ? { b: blockId } : { c: "card", name: name.trim(), phone: phone.trim(), note: note.trim() }), email: email.trim(), hp }),
         credentials: "same-origin",
         cache: "no-store",
       });
@@ -64,7 +70,27 @@ export function SubscribeForm({
       </p>
       {description && <p className="pp-subscribe-note">{description}</p>}
       {state === "done" ? null : (
-        <div className="pp-subscribe-row">
+        <div className={blockId ? "pp-subscribe-row" : "pp-subscribe-row pp-subscribe-stack"}>
+          {!blockId && (
+            <>
+              <label htmlFor={`${id}-name`} className="sr-only">
+                Your name
+              </label>
+              <input
+                id={`${id}-name`}
+                className="pp-subscribe-input"
+                name="name"
+                required
+                maxLength={100}
+                autoComplete="name"
+                placeholder="Your name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={inert}
+                aria-describedby={`${id}-consent ${id}-status`}
+              />
+            </>
+          )}
           <label htmlFor={`${id}-email`} className="sr-only">
             Email address
           </label>
@@ -82,6 +108,39 @@ export function SubscribeForm({
             disabled={inert}
             aria-describedby={`${id}-consent ${id}-status`}
           />
+          {!blockId && (
+            <>
+              <label htmlFor={`${id}-phone`} className="sr-only">
+                Phone number (optional)
+              </label>
+              <input
+                id={`${id}-phone`}
+                className="pp-subscribe-input"
+                type="tel"
+                name="phone"
+                maxLength={32}
+                autoComplete="tel"
+                placeholder="Phone number (optional)"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                disabled={inert}
+              />
+              <label htmlFor={`${id}-note`} className="sr-only">
+                Note (optional)
+              </label>
+              <textarea
+                id={`${id}-note`}
+                className="pp-subscribe-input pp-subscribe-note-input"
+                name="note"
+                maxLength={500}
+                rows={3}
+                placeholder="Note (optional)"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                disabled={inert}
+              />
+            </>
+          )}
           <div className="pp-subscribe-hp" aria-hidden="true">
             <label htmlFor={`${id}-website`}>Website</label>
             <input id={`${id}-website`} name="website" tabIndex={-1} autoComplete="off" value={hp} onChange={(e) => setHp(e.target.value)} />

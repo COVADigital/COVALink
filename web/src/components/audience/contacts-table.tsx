@@ -20,6 +20,10 @@ import { deleteContactAction } from "@/features/audience/actions";
 export interface ContactRow {
   id: string;
   email: string;
+  name: string | null;
+  phone: string | null;
+  note: string | null;
+  source: "block" | "card";
   status: "pending" | "confirmed";
   /** Already formatted on the server, so the table renders the same everywhere. */
   date: string;
@@ -59,6 +63,10 @@ export function ContactsTable({ profileId, contacts }: { profileId: string; cont
           <thead className="border-b border-cl-line text-left text-xs text-cl-ink-2">
             <tr>
               <th scope="col" className="px-4 py-2.5 font-medium">Email</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Name</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Phone</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Note</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">From</th>
               <th scope="col" className="px-4 py-2.5 font-medium">Status</th>
               <th scope="col" className="px-4 py-2.5 font-medium">Date</th>
               <th scope="col" className="w-12 px-2 py-2.5"><span className="sr-only">Actions</span></th>
@@ -68,6 +76,10 @@ export function ContactsTable({ profileId, contacts }: { profileId: string; cont
             {contacts.map((c) => (
               <tr key={c.id}>
                 <td className="max-w-64 truncate px-4 py-2 font-medium" title={c.email}>{c.email}</td>
+                <td className="max-w-48 truncate px-4 py-2" title={c.name ?? undefined}>{c.name ?? <span className="text-cl-ink-2">—</span>}</td>
+                <td className="whitespace-nowrap px-4 py-2">{c.phone ?? <span className="text-cl-ink-2">—</span>}</td>
+                <td className="max-w-56 truncate px-4 py-2" title={c.note ?? undefined}>{c.note ?? <span className="text-cl-ink-2">—</span>}</td>
+                <td className="whitespace-nowrap px-4 py-2 text-cl-ink-2">{c.source === "card" ? "Business card" : "Subscribe block"}</td>
                 <td className="px-4 py-2">
                   {c.status === "confirmed" ? (
                     <span className="rounded-full bg-cl-ok-wash px-2 py-0.5 text-xs text-cl-ok">Confirmed</span>

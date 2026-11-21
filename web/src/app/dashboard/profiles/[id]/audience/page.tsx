@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listContacts } from "@/features/audience/service";
 import { subscribeStatus } from "@/features/audience/status";
+import { readCard } from "@/features/cards/card";
 import { listOwnedProfiles } from "@/features/profiles/active";
 import { getOwnedProfile } from "@/features/profiles/service";
 import { can } from "@/lib/auth/permissions";
@@ -47,6 +48,8 @@ async function Audience({ params }: Pick<PageProps<"/dashboard/profiles/[id]/aud
   const [contacts, status, owned] = await Promise.all([listContacts(user.id, profile.id), subscribeStatus(), listOwnedProfiles(user.id)]);
   const sub = profileLinks(owned, (pid) => `/dashboard/profiles/${pid}/audience`, profile.id);
   const hasBlock = profile.draft.blocks.some((b) => b.type === "subscribe");
+  // Sign-ups also come from the business card's share-back form.
+  const collecting = hasBlock || readCard(profile.card, profile.draft.header.displayName).shareBack;
   const confirmed = contacts.filter((c) => c.status === "confirmed").length;
   const card = "grid gap-3 rounded-cl-lg border border-cl-line bg-cl-surface p-5";
 
@@ -69,13 +72,13 @@ async function Audience({ params }: Pick<PageProps<"/dashboard/profiles/[id]/aud
         )}
         {status.live && !user.emailVerified && <VerifyToCollectNote className="p-4" />}
 
-        {!hasBlock ? (
+        {!collecting ? (
           <section className={`${card} justify-items-start`} data-testid="audience-empty">
             <Users aria-hidden="true" className="size-6 text-cl-ink-2" />
             <h2 className="text-base font-medium">Collect subscribers on your page</h2>
             <p className="max-w-prose text-sm text-cl-ink-2">
-              Add a Subscribe block and visitors can leave their email address. Each one confirms by email before they appear here, and you can
-              export the list to your own email tool.
+              Add a Subscribe block, or turn on sharing details back on your business card, and visitors can leave their email address. Each one
+              confirms by email before they appear here, and you can export the list to your own email tool.
             </p>
             {status.subscribeEnabled && (
               <Button asChild className="min-h-11 rounded-full sm:min-h-0">
@@ -84,7 +87,7 @@ async function Audience({ params }: Pick<PageProps<"/dashboard/profiles/[id]/aud
             )}
           </section>
         ) : (
-          !profile.isPublished && (
+          !profile.isPublished && hasBlock && (
             <p role="note" className="rounded-cl-md bg-cl-inset p-4 text-sm text-cl-ink-2">
               This profile has a Subscribe block but isn&apos;t published. Publish it so visitors can sign up.
             </p>
@@ -98,11 +101,20 @@ async function Audience({ params }: Pick<PageProps<"/dashboard/profiles/[id]/aud
             </h2>
             <ContactsTable
               profileId={profile.id}
-              contacts={contacts.map((c) => ({ id: c.id, email: c.email, status: c.status, date: DATE.format(c.confirmedAt ?? c.createdAt) }))}
+              contacts={contacts.map((c) => ({
+                id: c.id,
+                email: c.email,
+                name: c.name,
+                phone: c.phone,
+                note: c.note,
+                source: c.source,
+                status: c.status,
+                date: DATE.format(c.confirmedAt ?? c.createdAt),
+              }))}
             />
           </section>
         ) : (
-          hasBlock && <p className="text-sm text-cl-ink-2" data-testid="audience-none">No sign-ups yet.</p>
+          collecting && <p className="text-sm text-cl-ink-2" data-testid="audience-none">No sign-ups yet.</p>
         )}
 
         {confirmed > 0 && (

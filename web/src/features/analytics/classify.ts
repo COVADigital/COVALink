@@ -86,7 +86,7 @@ export function referrerHost(raw: string | null | undefined, appHost: string): s
 }
 
 /** Traffic sources a beacon may report. Anything else is ignored (stored as no source). */
-export const SOURCES = ["qr"] as const;
+export const SOURCES = ["qr", "card"] as const;
 export type Source = (typeof SOURCES)[number];
 
 export function parseSource(raw: unknown): Source | null {

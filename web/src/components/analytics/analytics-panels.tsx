@@ -190,4 +190,4 @@ const DEVICE_LABELS: Record<string, string> = { mobile: "Mobile", tablet: "Table
 export const referrerRows = (rows: BreakdownRow[]) => rows.map((r) => ({ label: r.key ?? "Direct or unknown", value: r.views, muted: r.key === null }));
 export const deviceRows = (rows: BreakdownRow[]) => rows.map((r) => ({ label: DEVICE_LABELS[r.key ?? "unknown"] ?? "Unknown", value: r.views }));
 export const sourceRows = (rows: BreakdownRow[]) =>
-  rows.map((r) => ({ label: r.key === "qr" ? "QR code" : r.key === null ? "No source (link or direct)" : r.key, value: r.views, muted: r.key === null }));
+  rows.map((r) => ({ label: r.key === "qr" ? "QR code" : r.key === "card" ? "Business card" : r.key === null ? "No source (link or direct)" : r.key, value: r.views, muted: r.key === null }));

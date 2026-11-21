@@ -15,7 +15,7 @@ vi.mock("@/features/audience/status", async (importOriginal) => ({
 }));
 
 import { deleteContact, exportContacts, listContacts, PENDING_TTL_HOURS } from "@/features/audience/service";
-import { handleSubscribe, handleSubscribeToken } from "@/features/audience/subscribe";
+import { handleSubscribe, handleSubscribeToken, SUBSCRIBE_LIMITS } from "@/features/audience/subscribe";
 import * as svc from "@/features/profiles/service";
 import { bootstrapSuperAdmin } from "@/features/setup/service";
 import type { MailMessage } from "@/lib/mail";
@@ -228,6 +228,79 @@ describe("subscribe", () => {
     expect((await subscribe({ email: "fresh@example.com" }, { ip: "198.51.100.50" })).status).toBe(202);
     expect(sent).toHaveLength(1);
     expect(await count("covalink:subscribe:email:old")).toBe(0);
+  });
+});
+
+describe("business card sign-ups", () => {
+  const CARD = { displayName: "Alice's Card", color: "#c6f135", shareBack: true, saveContact: false };
+  const setCard = (card: object) => testSql()`update profiles set card = ${testSql().json(card as never)} where id = ${profileId}`;
+  const cardSignup = (body: Record<string, unknown>) =>
+    handleSubscribe(post("/api/subscribe", { p: profileId, c: "card", name: "Vera Visitor", hp: "", ...body }, { ip: "198.51.100.9" }), {
+      send: (m) => sent.push(m),
+      trustProxy: true,
+    });
+  const cardRows = async () =>
+    (await testSql()`select email, name, phone, note, source, block_id, consent_text from audience_contacts order by email`) as unknown as Record<string, unknown>[];
+
+  it("accept but store and send nothing while the card's share-back switch is off", async () => {
+    expect((await cardSignup({ email: "v@example.com" })).status).toBe(202);
+    await setCard({ ...CARD, shareBack: false });
+    expect((await cardSignup({ email: "v@example.com" })).status).toBe(202);
+    expect(await cardRows()).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
+  it("store the name, a canonical phone and the note with source card, and confirm by email like a Subscribe block", async () => {
+    await setCard(CARD);
+    const res = await cardSignup({ email: "V@Example.com", name: " Vera‮ Visitor ", phone: "+1 (555) 010-0200", note: "Met at​ the fair\nCall me" });
+    expect(res.status).toBe(202);
+    expect(await cardRows()).toEqual([
+      {
+        email: "v@example.com",
+        name: "Vera Visitor",
+        phone: "+15550100200",
+        note: "Met at the fair\nCall me",
+        source: "card",
+        block_id: null,
+        consent_text: "By sending, you agree to share these details with Alice's Card. You can remove them at any time.",
+      },
+    ]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].subject).toBe("Confirm your subscription");
+    expect(sent[0].text).toContain("business card");
+    // The email lists what is shared, but never echoes visitor-typed text (name, note) to the inbox.
+    expect(sent[0].text).toContain("this email address, a name, the phone number +15550100200 and a note");
+    expect(sent[0].text).not.toContain("Vera");
+    expect(sent[0].text).not.toContain("Met at");
+    // Until confirmed, anyone could have typed these details, so the owner sees only the email.
+    expect(await listContacts(alice, profileId)).toEqual([
+      expect.objectContaining({ email: "v@example.com", status: "pending", name: null, phone: null, note: null }),
+    ]);
+    expect((await confirm(tokenFrom(sent[0], "confirm"))).status).toBe(200);
+    const [contact] = await listContacts(alice, profileId);
+    expect(contact).toMatchObject({ name: "Vera Visitor", phone: "+15550100200", source: "card", status: "confirmed" });
+    expect(await exportContacts(alice, profileId)).toEqual([expect.objectContaining({ name: "Vera Visitor", source: "card" })]);
+  });
+
+  it("refuse a malformed phone, a note with control characters, a missing name, and mixing block and card fields", async () => {
+    await setCard(CARD);
+    for (const body of [
+      { email: "v@example.com", phone: "call me" },
+      { email: "v@example.com", note: "a\u0000b" },
+      { email: "v@example.com", name: "" },
+      { email: "v@example.com", b: ID(1) },
+    ]) {
+      expect((await cardSignup(body)).status).toBe(400);
+    }
+    expect(await cardRows()).toEqual([]);
+  });
+
+  it("share the per-email limit with Subscribe blocks", async () => {
+    await setCard(CARD);
+    for (let i = 0; i < SUBSCRIBE_LIMITS.perEmail; i++) await subscribe({ email: "v@example.com" });
+    sent = [];
+    expect((await cardSignup({ email: "v@example.com" })).status).toBe(202);
+    expect(sent).toEqual([]);
   });
 });
 

@@ -150,11 +150,11 @@ export const PROFILE_HEADERS_SOURCE = `/:handle(${PROFILE_PATH})`;
 
 /**
  * next.config.ts path pattern for every route that gets the page headers: all
- * but media, the QR and contacts downloads, the token pages, the exact vCard route
+ * but media, the QR, business card and contacts downloads, the token pages, the exact vCard route
  * (`/api/vcard`, one segment or three get the page headers) and the
  * public profile pages.
  */
-export const PAGE_HEADERS_SOURCE = `/:path((?!media/|dashboard/profiles/[^/]+/qr$|dashboard/profiles/[^/]+/audience/export$|reset-password$|verify-email$|subscribe/(?:confirm|remove)$|api/vcard/[^/]+/[^/]+$|${PROFILE_PATH}$).*)`;
+export const PAGE_HEADERS_SOURCE = `/:path((?!media/|dashboard/profiles/[^/]+/qr$|dashboard/profiles/[^/]+/card/download$|dashboard/profiles/[^/]+/audience/export$|reset-password$|verify-email$|subscribe/(?:confirm|remove)$|api/vcard/[^/]+/[^/]+$|${PROFILE_PATH}$).*)`;
 
 /** next.config.ts path pattern for the pages that receive a token in their link fragment. */
 export const TOKEN_PAGE_HEADERS_SOURCE = "/:page(reset-password|verify-email|subscribe/confirm|subscribe/remove)";

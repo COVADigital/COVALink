@@ -201,9 +201,9 @@ test("a visitor signs up and confirms from the email; the owner sees, exports an
   const file = await download;
   expect(file.suggestedFilename()).toBe(`${HANDLE}-contacts.csv`);
   const lines = (await readFile((await file.path())!, "utf8")).trimEnd().split("\r\n");
-  expect(lines[0]).toBe("email,confirmed_at,consent_text");
+  expect(lines[0]).toBe("email,name,phone,note,source,confirmed_at,consent_text");
   expect(lines).toHaveLength(2);
-  expect(lines[1]).toMatch(new RegExp(`^${FAN.replace(/\./g, "\\.")},\\d{4}-\\d{2}-\\d{2}T`));
+  expect(lines[1]).toMatch(new RegExp(`^${FAN.replace(/\./g, "\\.")},,,,block,\\d{4}-\\d{2}-\\d{2}T`));
 
   // Delete: cancel returns focus to the row's button; confirming removes the row and says so.
   const del = row.getByRole("button", { name: `Delete ${FAN}` });

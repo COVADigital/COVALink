@@ -20,7 +20,12 @@ const pendingCutoff = () => new Date(Date.now() - PENDING_TTL_HOURS * 3600_000);
  */
 export async function recordSignup(input: {
   profileId: string;
-  blockId: string;
+  /** A Subscribe block's id, or null for the business card's share-back form. */
+  blockId: string | null;
+  /** What a card sign-up shared besides the email. */
+  name?: string;
+  phone?: string;
+  note?: string;
   email: string;
   consentText: string;
 }): Promise<{ confirmToken: string; removeToken: string } | null> {
@@ -31,7 +36,11 @@ export async function recordSignup(input: {
     // keeps its last expired rows until the next one. Move to a scheduled job if one is added.
     await tx.delete(audienceContacts).where(and(eq(audienceContacts.status, "pending"), lt(audienceContacts.createdAt, pendingCutoff())));
     const values = {
+      source: input.blockId ? ("block" as const) : ("card" as const),
       blockId: input.blockId,
+      name: input.name ?? null,
+      phone: input.phone ?? null,
+      note: input.note ?? null,
       consentText: input.consentText,
       confirmTokenHash: hashToken(confirmToken),
       removeTokenHash: hashToken(removeToken),
@@ -78,17 +87,29 @@ export async function removeSignup(token: string): Promise<boolean> {
 export interface AudienceContact {
   id: string;
   email: string;
+  name: string | null;
+  phone: string | null;
+  note: string | null;
+  source: "block" | "card";
   status: "pending" | "confirmed";
   createdAt: Date;
   confirmedAt: Date | null;
 }
 
-/** The profile's contacts, newest first; expired pending rows are left out. Scoped to the owner. */
+/** A card sign-up's details are the owner's to see only once the visitor confirmed them (until then anyone could have typed them). */
+const onceConfirmed = (column: typeof audienceContacts.name | typeof audienceContacts.phone | typeof audienceContacts.note) =>
+  sql<string | null>`case when ${audienceContacts.status} = 'confirmed' then ${column} end`;
+
+/** The profile's contacts, newest first; expired pending rows are left out, and pending rows show only the email. Scoped to the owner. */
 export async function listContacts(ownerId: string, profileId: string): Promise<AudienceContact[]> {
   return db
     .select({
       id: audienceContacts.id,
       email: audienceContacts.email,
+      name: onceConfirmed(audienceContacts.name),
+      phone: onceConfirmed(audienceContacts.phone),
+      note: onceConfirmed(audienceContacts.note),
+      source: audienceContacts.source,
       status: audienceContacts.status,
       createdAt: audienceContacts.createdAt,
       confirmedAt: audienceContacts.confirmedAt,
@@ -108,7 +129,15 @@ export async function listContacts(ownerId: string, profileId: string): Promise<
 /** Confirmed contacts for the CSV export, oldest first. Scoped to the owner. */
 export async function exportContacts(ownerId: string, profileId: string) {
   return db
-    .select({ email: audienceContacts.email, confirmedAt: audienceContacts.confirmedAt, consentText: audienceContacts.consentText })
+    .select({
+      email: audienceContacts.email,
+      name: audienceContacts.name,
+      phone: audienceContacts.phone,
+      note: audienceContacts.note,
+      source: audienceContacts.source,
+      confirmedAt: audienceContacts.confirmedAt,
+      consentText: audienceContacts.consentText,
+    })
     .from(audienceContacts)
     .innerJoin(profiles, eq(profiles.id, audienceContacts.profileId))
     .where(and(eq(audienceContacts.profileId, profileId), eq(profiles.ownerId, ownerId), eq(audienceContacts.status, "confirmed")))

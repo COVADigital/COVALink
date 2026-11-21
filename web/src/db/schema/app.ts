@@ -50,6 +50,8 @@ export const profiles = pgTable(
     draftRevision: integer("draft_revision").notNull().default(0),
     publishedRevision: integer("published_revision"),
     draftUpdatedAt: timestamp("draft_updated_at", { withTimezone: true }).notNull().defaultNow(),
+    // Business card settings (`cardSchema` in features/cards/card.ts); null until first saved. Not part of the page.
+    card: jsonb("card"),
     createdAt,
     updatedAt,
   },
@@ -225,7 +227,7 @@ export const auditLogs = pgTable(
 );
 
 /**
- * Visitors who signed up through a profile's Subscribe block. A row starts
+ * Visitors who signed up through a profile's Subscribe block or its business card. A row starts
  * `pending` and becomes `confirmed` through the emailed link (double opt-in);
  * pending rows older than 48 hours are deleted on the next sign-up to any
  * profile. Only SHA-256 hashes of the confirm and remove tokens are stored.
@@ -241,8 +243,15 @@ export const audienceContacts = pgTable(
     email: text("email").notNull(),
     status: text("status", { enum: ["pending", "confirmed"] }).notNull(),
     consentText: text("consent_text").notNull(),
-    // Not a foreign key: blocks live inside the profile document.
-    blockId: uuid("block_id").notNull(),
+    // Where they signed up: a Subscribe block, or the business card's share-back form (features/cards).
+    source: text("source", { enum: ["block", "card"] }).notNull().default("block"),
+    // Not a foreign key: blocks live inside the profile document. Set only for `block` sign-ups.
+    blockId: uuid("block_id"),
+    // What a card sign-up shared besides the email; Subscribe blocks ask only for the email.
+    name: text("name"),
+    // Canonical (`canonicalPhone`): an optional leading + and 4–15 digits. Not verified, unlike the email.
+    phone: text("phone"),
+    note: text("note"),
     confirmTokenHash: text("confirm_token_hash").unique(),
     removeTokenHash: text("remove_token_hash").notNull().unique(),
     createdAt,
@@ -254,6 +263,13 @@ export const audienceContacts = pgTable(
     // For the sweep of expired pending sign-ups across all profiles.
     index("audience_contacts_pending_created_idx").on(t.createdAt).where(sql`${t.status} = 'pending'`),
     check("audience_contacts_status_valid", sql`${t.status} in ('pending', 'confirmed')`),
+    check(
+      "audience_contacts_source_valid",
+      sql`(${t.source} = 'block' and ${t.blockId} is not null) or (${t.source} = 'card' and ${t.blockId} is null)`,
+    ),
+    check("audience_contacts_name_length", sql`${t.name} is null or char_length(${t.name}) between 1 and 100`),
+    check("audience_contacts_phone_format", sql`${t.phone} is null or ${t.phone} ~ '^[+]?[0-9]{4,15}$'`),
+    check("audience_contacts_note_length", sql`${t.note} is null or char_length(${t.note}) between 1 and 500`),
     check("audience_contacts_email_format", sql`char_length(${t.email}) <= 254 and ${t.email} = lower(${t.email})`),
     check(
       "audience_contacts_status_consistency",

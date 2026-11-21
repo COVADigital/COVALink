@@ -25,8 +25,8 @@ export async function GET(request: Request, { params }: RouteContext<"/dashboard
   }
   const rows = await exportContacts(user.id, profile.id);
   const body = [
-    csvRow(["email", "confirmed_at", "consent_text"]),
-    ...rows.map((r) => csvRow([r.email, r.confirmedAt?.toISOString() ?? "", r.consentText])),
+    csvRow(["email", "name", "phone", "note", "source", "confirmed_at", "consent_text"]),
+    ...rows.map((r) => csvRow([r.email, r.name ?? "", r.phone ?? "", r.note ?? "", r.source, r.confirmedAt?.toISOString() ?? "", r.consentText])),
   ].join("\r\n");
   return new Response(`${body}\r\n`, { status: 200, headers: csvResponseHeaders(`${profile.handle}-contacts.csv`) });
 }

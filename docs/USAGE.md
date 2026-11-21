@@ -83,14 +83,25 @@ Each profile has an **Analytics** page, visible only to you, with views, clicks 
 
 The analytics page also offers a **QR code** for the profile, as an SVG download. If you change the profile's handle, download a new code: the old one points to the old address.
 
+## Business card
+
+Each profile has a **Business card** page with a card showing a display name, the profile's address and a QR code.
+
+- **Style:** pick the display name (up to 60 characters) and one of the background colours. The preview updates as you change them; **Save**, then **Download SVG** to print or share the saved card.
+- **QR code:** the card's code opens your page with `?src=card`, so these visits appear as "Business card" under Sources on the Analytics page. As with the analytics QR code, a printed card is tied to your handle: if you change the handle, download a new card.
+- **When someone scans your card:** two switches add a panel at the top of your page, shown only to visitors who opened it from the card's QR code. Other visits show your normal page, and a reload or a shared link doesn't show the panel again. The card link isn't secret, though: anyone can open your page with it, so treat what you turn on here as public.
+  - **Let visitors share their details back** shows a form for their name and email, plus an optional phone number and note. Each person confirms by email and then appears on your Audience page as "Business card"; their name, phone and note show once they've confirmed. The same rules as Subscribe blocks apply: email must be set up, the server must be able to tell visitors apart, Subscribe blocks must be allowed, and your email address must be verified. The card page says when one of these is missing.
+  - **Let visitors save your contact** shows a **Save contact** button that downloads your contact details as a vCard, which the visitor's phone offers to add to their contacts. Turning it on asks for your contact details first (a name or organization, and optionally job title, email, phone and website). While the switch is on, anyone who visits your page can download these details, not only people with the card.
+- Nothing is read from a visitor's phone: they type or autofill the form and choose to send it.
+
 ## Audience
 
-Each profile has an **Audience** page listing the people who signed up through its Subscribe block.
+Each profile has an **Audience** page listing the people who signed up through its Subscribe block or its [business card](#business-card).
 
 - **Double opt-in:** a visitor enters their address and gets an email with a confirmation link. They appear as a contact only after confirming. Unconfirmed sign-ups show as Pending, stop working after 48 hours, and are then removed.
 - **Consent:** the form shows a fixed line saying the visitor shares their email with you and can remove it at any time. That wording is saved with each contact.
 - **Removal:** every confirmation email has a link that removes the address. You can also delete any contact from the Audience page.
-- **Export:** **Export CSV** downloads your confirmed contacts (email, confirmation time and the consent wording). COVALink doesn't send newsletters; use the file with your own email tool.
+- **Export:** **Export CSV** downloads your confirmed contacts (email, name, phone, note, where they signed up, confirmation time and the consent wording; Subscribe block sign-ups have only an email). COVALink doesn't send newsletters; use the file with your own email tool.
 - **Email is required:** sign-ups are confirmed by email, so the Subscribe block isn't shown to visitors while the installation has no email configured, while the server can't tell visitors apart (the administrator hasn't set `TRUST_PROXY`, see [Deployment](DEPLOYMENT.md#trust_proxy)), or while the administrator has turned Subscribe blocks off. The dashboard says so on the Audience page and in the block's editor. Existing contacts are kept either way.
 - **Verify your email first:** a profile collects sign-ups only while its owner's email address is verified. If yours isn't, the Audience page and the block's editor say so, and **Account → Send verification link** emails you a link.
 - Deleting a profile deletes its contacts.

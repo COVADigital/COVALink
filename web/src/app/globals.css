@@ -490,6 +490,20 @@
     color: var(--pp-text, #18181b);
     font: inherit;
   }
+  /* The business card's form: one field per line, like a contact sheet. */
+  .pp-subscribe-stack {
+    flex-direction: column;
+  }
+  .pp-subscribe-stack > .pp-subscribe-input,
+  .pp-subscribe-stack > .pp-btn {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+  .pp-subscribe-note-input {
+    min-height: 5rem;
+    padding: 0.75rem 1rem;
+    resize: vertical;
+  }
   .pp-subscribe-input:focus-visible,
   .pp-subscribe .pp-btn:focus-visible {
     outline: 2px solid var(--pp-accent, currentColor);
@@ -517,6 +531,38 @@
     width: 1px;
     height: 1px;
     overflow: hidden;
+  }
+  /* Business card welcome: for visitors who scanned the card; a framed panel in the page colors. */
+  .pp-card-welcome {
+    position: relative;
+    display: grid;
+    gap: 1rem;
+    padding: 1.25rem;
+    padding-top: 2.75rem;
+    border: 1px solid color-mix(in srgb, var(--pp-text, #18181b) 25%, transparent);
+    border-radius: var(--pp-btn-radius, 12px);
+  }
+  .pp-card-welcome-close {
+    position: absolute;
+    top: 0.25rem;
+    right: 0.25rem;
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .pp-card-welcome-close svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+  .pp-card-welcome-close:focus-visible {
+    outline: 2px solid var(--pp-accent, currentColor);
+    outline-offset: 2px;
   }
   .pp-divider {
     width: 100%;

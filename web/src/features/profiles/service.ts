@@ -117,6 +117,8 @@ export async function getOwnedProfile(ownerId: string, profileId: string) {
     draftRevision: row.draftRevision,
     publishedRevision: row.publishedRevision,
     draftUpdatedAt: row.draftUpdatedAt,
+    /** Raw business card settings; read with `readCard` (features/cards/card.ts). */
+    card: row.card,
     draft,
     /**
      * Stored draft blocks this version can't rewrite losslessly (unreadable,
