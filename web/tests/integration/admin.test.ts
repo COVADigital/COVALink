@@ -95,7 +95,7 @@ describe("authorized reads (every service checks the actor itself)", () => {
     expect(forAdmin.get("site.name")).toMatchObject({ editable: true, value: "COVALink" });
     expect(forSuper.get("registration.inviteOnly")).toMatchObject({ editable: true });
     expect([...forAdmin.keys()].sort()).toEqual(
-      ["analytics.retentionDays", "media.quotaMb", "media.uploadsPerHour", "profiles.maxPerUser", "registration.enabled", "registration.inviteOnly", "site.name"].sort(),
+      ["analytics.retentionDays", "audience.subscribeEnabled", "media.quotaMb", "media.uploadsPerHour", "profiles.maxPerUser", "registration.enabled", "registration.inviteOnly", "site.name"].sort(),
     );
   });
 });

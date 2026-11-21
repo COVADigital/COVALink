@@ -9,6 +9,7 @@ import { useForm, useWatch, type FieldErrors } from "react-hook-form";
 import { z } from "zod";
 import { FormField } from "@/components/auth/form-field";
 import { AppearanceEditor, useAppearance, type AppearanceInfo } from "@/components/editor/appearance-editor";
+import { AudienceContext } from "@/components/editor/block-editors";
 import { BlockListEditor, useBlockList } from "@/components/editor/block-list-editor";
 import { editorStatus, NETWORK_ERROR, type EditorOp, type EditorOutcome, type EditorStatus } from "@/components/editor/editor-status";
 import { MediaPicker, useMediaLibrary } from "@/components/editor/media-picker";
@@ -145,6 +146,7 @@ export function ProfileEditor({
   links,
   switcher,
   manage,
+  audience,
 }: {
   profile: EditorProfile;
   /** The owner's name for this profile (only they see it). */
@@ -154,6 +156,8 @@ export function ProfileEditor({
   switcher: ReactNode;
   /** Address, name and deletion forms, shown at the end of the Profile section. */
   manage: ReactNode;
+  /** Whether the Subscribe block can work here (email, the operator setting) and who is asking. */
+  audience: { emailReady: boolean; visitorsKnown: boolean; subscribeEnabled: boolean; admin: boolean; ownerVerified: boolean };
 }) {
   const [state, setState] = useState({
     revision: profile.revision,
@@ -783,7 +787,9 @@ export function ProfileEditor({
 
             <TabsContent value="content" forceMount className="grid gap-5 data-[state=inactive]:hidden">
               <SectionHeading title="Content" lede="Visitors see these blocks in order. Drag a handle, or focus it and use the arrow keys." />
-              <BlockListEditor list={blocks} disabled={controlsOff} media={{ library: media, selectedInEditor }} />
+              <AudienceContext value={audience}>
+                <BlockListEditor list={blocks} disabled={controlsOff} media={{ library: media, selectedInEditor }} />
+              </AudienceContext>
             </TabsContent>
 
             <TabsContent value="design" forceMount className="grid gap-5 data-[state=inactive]:hidden">

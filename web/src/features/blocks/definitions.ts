@@ -406,6 +406,27 @@ const contactBlock = define({
   migrate: sameConfig,
 });
 
+/**
+ * An email sign-up form with double opt-in (features/audience). The consent
+ * line under the form is fixed, not editable, so every contact agreed to the
+ * same wording; the public page hides the block while email isn't set up.
+ */
+const subscribeBlock = define({
+  type: "subscribe",
+  version: 1,
+  label: "Subscribe",
+  description: "Collects visitors' email addresses. Each one confirms by email.",
+  category: "contact",
+  schema: z
+    .object({
+      title: plainText(80, "Add a title"),
+      description: optionalPlainText(200),
+      buttonLabel: plainText(40, "Add a button label"),
+    })
+    .strict(),
+  defaults: () => ({ title: "Join my list", description: "", buttonLabel: "Subscribe" }),
+});
+
 export const BLOCK_DEFINITIONS = {
   link: linkBlock,
   heading: headingBlock,
@@ -419,6 +440,7 @@ export const BLOCK_DEFINITIONS = {
   email: emailBlock,
   phone: phoneBlock,
   contact: contactBlock,
+  subscribe: subscribeBlock,
 } as const;
 
 export type BlockType = keyof typeof BLOCK_DEFINITIONS;
@@ -449,6 +471,7 @@ export const EDITABLE_BLOCK_TYPES = [
   "image",
   "video",
   "music",
+  "subscribe",
 ] as const satisfies readonly BlockType[];
 export type EditableBlockType = (typeof EDITABLE_BLOCK_TYPES)[number];
 
@@ -466,6 +489,7 @@ export const RENDERABLE_BLOCK_TYPES = [
   "image",
   "video",
   "music",
+  "subscribe",
 ] as const satisfies readonly BlockType[];
 export type RenderableBlockType = (typeof RENDERABLE_BLOCK_TYPES)[number];
 
@@ -497,4 +521,5 @@ export const BLOCK_INPUT_SCHEMAS = {
   image: imageInputSchema,
   video: videoBlock.schema,
   music: musicBlock.schema,
+  subscribe: subscribeBlock.schema,
 } satisfies Record<EditableBlockType, z.ZodType>;

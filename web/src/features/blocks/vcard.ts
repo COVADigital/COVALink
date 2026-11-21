@@ -20,6 +20,9 @@ type Contact = BlockConfig<"contact">;
 /** The public download of a published contact block (`app/api/vcard/[profileId]/[blockId]`). */
 export const vcardPath = (profileId: string, blockId: string) => `/api/vcard/${profileId}/${blockId}`;
 
+/** The business card's contact download (`app/api/vcard/[profileId]/card`). */
+export const cardVcardPath = (profileId: string) => `/api/vcard/${profileId}/card`;
+
 const OTHER_CONTROLS = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029]/g;
 const PRINTABLE_ASCII = /^[\x21-\x7e]+$/;
 const FOLD_OCTETS = 75;

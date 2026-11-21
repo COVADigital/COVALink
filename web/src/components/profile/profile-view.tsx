@@ -1,4 +1,5 @@
 import { BadgeCheck } from "lucide-react";
+import type { ReactNode } from "react";
 import { ProfileBlocks, type ViewBlock } from "@/components/profile/blocks";
 import type { ProfileDocument } from "@/features/profiles/document";
 import { themeToStyle } from "@/features/themes/css";
@@ -65,18 +66,25 @@ export function ProfileView({
   verified,
   mode,
   clickTrackingProfileId,
+  subscribeLive,
+  intro,
 }: {
   document: ViewDocument;
   verified: boolean;
   mode: "public" | "preview";
   /** Public page only: routes link blocks through `/go` (RenderContext). */
   clickTrackingProfileId?: string;
+  /** Public page only: whether Subscribe blocks are shown (RenderContext). */
+  subscribeLive?: boolean;
+  /** Public page only: shown under the header, inside the theme (the business card's welcome panel). */
+  intro?: ReactNode;
 }) {
   const Root = mode === "public" ? "main" : "div";
   return (
     <div className="pp-root" data-mode={mode} style={themeToStyle(document.theme)}>
       <Root className="pp-container">
         <ProfileHeader header={document.header} verified={verified} nameAs={mode === "public" ? "h1" : "p"} />
+        {intro}
         <ProfileBlocks
           blocks={document.blocks}
           ctx={{
@@ -84,6 +92,8 @@ export function ProfileView({
             openLinksInNewTab: document.settings.openLinksInNewTab,
             clickTrackingProfileId,
             socialStyle: document.theme.social.style,
+            displayName: document.header.displayName,
+            subscribeLive,
           }}
         />
         {document.settings.showBranding && (

@@ -36,6 +36,41 @@
       "when": 1793655373649,
       "tag": "0004_analytics",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795227221215,
+      "tag": "0005_audience",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795244482691,
+      "tag": "0006_audience_pending_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795283256481,
+      "tag": "0007_business_card",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795284589897,
+      "tag": "0008_audience_card_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795284903160,
+      "tag": "0009_audience_card_details",
+      "breakpoints": true
     }
   ]
 }

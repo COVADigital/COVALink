@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AdminError, AdminFrame, AdminSkeleton, PageTitle } from "@/components/admin/admin-frame";
 import { SettingForm } from "@/components/admin/setting-form";
+import { EmailSetupNote, VisitorAddressNote } from "@/components/email-setup-note";
 import { SETTING_GROUPS, SETTING_SPECS } from "@/features/settings/catalog";
 import { getAdminSettings, type AdminSetting } from "@/features/settings/service";
 import { requireCapability } from "@/lib/auth/session";
+import { env, smtpConfigured } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
 export const metadata: Metadata = { title: "Settings · Administration", robots: { index: false, follow: false } };
@@ -60,6 +62,8 @@ async function Settings() {
               Email delivery is configured with environment variables on the server (<code>SMTP_*</code>) and can&apos;t be changed here. The
               Overview shows whether it is configured.
             </p>
+            {!smtpConfigured() && <EmailSetupNote admin className="mt-4" />}
+            {smtpConfigured() && !env().TRUST_PROXY && <VisitorAddressNote admin className="mt-4" />}
           </section>
         </>
       )}

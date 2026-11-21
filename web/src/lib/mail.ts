@@ -26,7 +26,7 @@ export interface MailMessage {
 }
 
 /** Which kind of message; the only detail that ever reaches a log line. */
-export type MailKind = "password-reset" | "email-verification";
+export type MailKind = "password-reset" | "email-verification" | "subscribe-confirm";
 
 /** Replaces SMTP delivery (tests only; `null` restores SMTP). */
 export type MailTransport = (msg: MailMessage) => Promise<void>;
@@ -94,18 +94,30 @@ export function dispatchMail(msg: MailMessage, kind: MailKind): void {
  * The link put in an email. The token travels in the fragment, which browsers
  * never send to a server, so it can't reach access logs, referrers or caches.
  */
-export function tokenLink(page: "/reset-password" | "/verify-email", token: string): string {
+export function tokenLink(page: "/reset-password" | "/verify-email" | "/subscribe/confirm" | "/subscribe/remove", token: string): string {
   return `${env().APP_URL.replace(/\/+$/, "")}${page}#token=${encodeURIComponent(token)}`;
 }
 
-export function actionEmail(opts: { heading: string; body: string; actionLabel: string; url: string }) {
-  const text = `${opts.heading}\n\n${opts.body}\n\n${opts.actionLabel}: ${opts.url}\n\nIf you didn't request this, you can ignore this email.`;
+/** `footer`: a second, quieter link under the button (the Subscribe email's "remove my email"). */
+export function actionEmail(opts: {
+  heading: string;
+  body: string;
+  actionLabel: string;
+  url: string;
+  footer?: { text: string; label: string; url: string };
+}) {
+  const footerText = opts.footer ? `\n\n${opts.footer.text} ${opts.footer.label}: ${opts.footer.url}` : "";
+  const text = `${opts.heading}\n\n${opts.body}\n\n${opts.actionLabel}: ${opts.url}\n\nIf you didn't request this, you can ignore this email.${footerText}`;
   const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
   const html = `<!doctype html><html><body style="font-family:system-ui,sans-serif;background:#f4f4f5;padding:32px">
 <table role="presentation" style="max-width:480px;margin:auto;background:#fff;border-radius:12px;padding:32px">
 <tr><td><h1 style="font-size:20px;margin:0 0 12px">${esc(opts.heading)}</h1>
 <p style="color:#3f3f46;line-height:1.5">${esc(opts.body)}</p>
 <p style="margin:24px 0"><a href="${esc(opts.url)}" style="background:#18181b;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;display:inline-block">${esc(opts.actionLabel)}</a></p>
-<p style="color:#71717a;font-size:13px">If you didn't request this, you can ignore this email.</p></td></tr></table></body></html>`;
+<p style="color:#71717a;font-size:13px">If you didn't request this, you can ignore this email.</p>${
+    opts.footer
+      ? `<p style="color:#71717a;font-size:13px">${esc(opts.footer.text)} <a href="${esc(opts.footer.url)}" style="color:#3f3f46">${esc(opts.footer.label)}</a></p>`
+      : ""
+  }</td></tr></table></body></html>`;
   return { text, html };
 }

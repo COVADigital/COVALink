@@ -42,7 +42,8 @@ export const createProfileInput = z
 export const updateProfileMetaInput = z
   .object({
     handle: handleSchema,
-    label: z.string().trim().min(1, "Give this profile a name").max(40),
+    /** Left out to change only the handle, so a stale label from another tab isn't written back. */
+    label: z.string().trim().min(1, "Give this profile a name").max(40).optional(),
   })
   .strict();
 
@@ -116,6 +117,8 @@ export async function getOwnedProfile(ownerId: string, profileId: string) {
     draftRevision: row.draftRevision,
     publishedRevision: row.publishedRevision,
     draftUpdatedAt: row.draftUpdatedAt,
+    /** Raw business card settings; read with `readCard` (features/cards/card.ts). */
+    card: row.card,
     draft,
     /**
      * Stored draft blocks this version can't rewrite losslessly (unreadable,
@@ -167,7 +170,7 @@ export async function updateProfileMeta(ownerId: string, profileId: string, inpu
   try {
     await db
       .update(profiles)
-      .set({ handle: data.handle, label: data.label })
+      .set(data.label === undefined ? { handle: data.handle } : { handle: data.handle, label: data.label })
       .where(and(eq(profiles.id, profileId), eq(profiles.ownerId, ownerId)));
   } catch (err) {
     if (isUniqueViolation(err)) throw new AppError("That handle is taken.", "CONFLICT", { handle: ["That handle is taken"] });

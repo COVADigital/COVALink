@@ -160,14 +160,25 @@ test("account page: the account name and password change with validation, announ
   const name = page.getByRole("textbox", { name: "Account name" });
   await expect(name).toHaveValue(ACCOUNT.name);
   await name.fill("   ");
-  await page.getByRole("button", { name: "Save account name" }).click();
+  await page.getByRole("button", { name: "Save details" }).click();
   await expect(name).toHaveAttribute("aria-invalid", "true");
   await expect(name).toBeFocused();
   await name.fill("  Andy Renamed  ");
-  await page.getByRole("button", { name: "Save account name" }).click();
+  await page.getByRole("button", { name: "Save details" }).click();
   await expect(page.getByText("Account name saved.")).toBeFocused();
   await page.reload();
   await expect(name).toHaveValue("Andy Renamed");
+
+  // The password form opens in place from its row, and closes again with focus back on the toggle.
+  const toggle = page.getByRole("button", { name: "Change password" });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByLabel("Current password")).toHaveCount(0);
+  await toggle.click();
+  await expect(page.getByLabel("Current password")).toBeFocused();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByLabel("Current password")).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+  await toggle.click();
 
   await expect(page.getByLabel("Sign out my other devices")).toBeChecked();
   await page.getByLabel("Current password").fill("not-my-password-at-all");
@@ -257,4 +268,82 @@ test("phone width: account and token pages fit and have 44 px targets", async ({
   );
   for (const h of heights) expect(h).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+});
+
+test("account page: the settings nav replaces the rail, jumps to sections and marks the one being read", async ({ page, baseURL }) => {
+  await signIn(page, baseURL!, { ...ACCOUNT, password: NEW_PASSWORD });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/dashboard/account");
+  const nav = page.getByRole("navigation", { name: "Account settings" });
+  await expect(nav).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Back to dashboard" })).toHaveAttribute("href", "/dashboard");
+  await expect(nav.getByRole("button", { name: "Account menu" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Personal" })).toHaveAttribute("aria-current", "location");
+
+  await nav.getByRole("link", { name: "Account management" }).click();
+  await expect(page).toHaveURL(/#management$/);
+  await expect(page.getByRole("heading", { level: 2, name: "Account management" })).toBeInViewport();
+  await expect(nav.getByRole("link", { name: "Account management" })).toHaveAttribute("aria-current", "location");
+  await expect(page.getByText("Owner (you)")).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Personal" })).not.toHaveAttribute("aria-current", "location");
+
+  // This account owns no profiles: the empty state points to where they are created.
+  await expect(page.getByText("You don't have a profile yet.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Create one" })).toHaveAttribute("href", "/dashboard/profiles");
+
+  // Below 75rem the same links are chips under the top bar, and the page still fits.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/dashboard/account");
+  const chips = page.getByRole("navigation", { name: "Account settings" });
+  await expect(chips.getByRole("link", { name: "Security" })).toBeVisible();
+  await chips.getByRole("link", { name: "Security" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "Security" })).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+});
+
+test("account page: a profile's handle changes from its menu after a review step", async ({ page, baseURL }) => {
+  await signIn(page, baseURL!, { ...ACCOUNT, password: NEW_PASSWORD });
+  for (const handle of ["acct-first", "acct-second"]) {
+    await page.goto("/dashboard/profiles");
+    await page.locator("#handle").fill(handle);
+    await page.locator("#label").fill(handle === "acct-first" ? "First" : "Second");
+    await page.locator("#displayName").fill(ACCOUNT.name);
+    await page.getByRole("button", { name: "Create profile" }).click();
+    await expect(page.getByTestId("editor-handle").filter({ visible: true })).toHaveText(`/${handle}`);
+  }
+  await page.goto("/dashboard/account");
+  const menu = page.getByRole("button", { name: "Actions for First" });
+  await menu.click();
+  await expect(page.getByRole("menuitem", { name: "Edit profile" })).toHaveAttribute("href", /\/dashboard\/profiles\/[0-9a-f-]+$/);
+  await page.getByRole("menuitem", { name: "Change handle" }).click();
+  const field = page.getByLabel("New handle");
+  await expect(field).toHaveValue("acct-first");
+
+  // Unchanged, then reserved: refused before the review step.
+  await page.getByRole("button", { name: "Review handle change" }).click();
+  await expect(field).toHaveAttribute("aria-invalid", "true");
+  await field.fill("dashboard");
+  await page.getByRole("button", { name: "Review handle change" }).click();
+  await expect(page.getByText("That handle is reserved")).toBeVisible();
+
+  // Taken: the server refuses on confirm and the dialog returns to the field with the reason.
+  await field.fill("acct-second");
+  await page.getByRole("button", { name: "Review handle change" }).click();
+  await page.getByRole("button", { name: "Change handle" }).click();
+  await expect(page.getByLabel("New handle")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByText("That handle is taken")).toBeVisible();
+
+  // Back from the review keeps the typed value; confirming moves the page.
+  await page.getByLabel("New handle").fill("@Acct-Renamed");
+  await page.getByRole("button", { name: "Review handle change" }).click();
+  await expect(page.getByRole("heading", { name: "Change /acct-first to /acct-renamed?" })).toBeVisible();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByLabel("New handle")).toHaveValue("@Acct-Renamed");
+  await page.getByRole("button", { name: "Review handle change" }).click();
+  await page.getByRole("button", { name: "Change handle" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(menu).toBeFocused();
+  await expect(page.getByTestId("owned-profile").filter({ hasText: "First" })).toContainText("/acct-renamed");
+  await expect(page.getByRole("status").filter({ hasText: "Handle changed." })).toHaveText("Handle changed. First is now at /acct-renamed.");
 });

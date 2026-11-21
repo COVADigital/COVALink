@@ -168,7 +168,7 @@ describe("token-page headers", () => {
   it("routes the token pages to the token rule only and every other page to the page rule only", () => {
     const page = pathToRegexp(PAGE_HEADERS_SOURCE);
     const token = pathToRegexp(TOKEN_PAGE_HEADERS_SOURCE);
-    for (const p of ["/reset-password", "/verify-email"]) {
+    for (const p of ["/reset-password", "/verify-email", "/subscribe/confirm", "/subscribe/remove"]) {
       expect(page.test(p), p).toBe(false);
       expect(token.test(p), p).toBe(true);
     }
@@ -181,6 +181,9 @@ describe("token-page headers", () => {
       expect([page.test(p), token.test(p), pathToRegexp(PROFILE_HEADERS_SOURCE).test(p)], p).toEqual([false, false, true]);
     }
     expect(page.test("/media/ab/cd/x.webp")).toBe(false);
+    // Downloads that set their own headers (one CSP each) stay out of the page rule; the card page itself doesn't.
+    for (const p of ["/dashboard/profiles/x/qr", "/dashboard/profiles/x/card/download", "/dashboard/profiles/x/audience/export"]) expect(page.test(p), p).toBe(false);
+    expect(page.test("/dashboard/profiles/x/card")).toBe(true);
   });
 });
 

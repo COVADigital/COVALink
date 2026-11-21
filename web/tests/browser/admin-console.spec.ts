@@ -190,7 +190,8 @@ test("keyboard: the skip link leads to the main content, and the section navigat
   await expect(page.locator("main#main")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Event")).toBeFocused();
-  const nav = page.getByRole("navigation", { name: "Administration" });
+  // From 75rem the admin pages are listed under Administration in the sidebar.
+  const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Audit log" })).toHaveAttribute("aria-current", "page");
   await nav.getByRole("link", { name: "Users" }).focus();
   await page.keyboard.press("Enter");

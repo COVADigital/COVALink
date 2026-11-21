@@ -1,6 +1,6 @@
 # Email delivery
 
-COVALink can run without an email provider, but email delivery is required for password recovery and for registrations that require email verification. COVALink sends account email through standard SMTP.
+COVALink can run without an email provider, but email delivery is required for password recovery, for registrations that require email verification, and for the Subscribe block and the business card's share-back form, whose sign-ups are confirmed by email. Without email, profile pages, links and analytics work as normal, and the dashboard shows a note wherever a feature needs email. COVALink sends account email through standard SMTP.
 
 This guide covers:
 
@@ -20,7 +20,8 @@ It doesn't add useSend, Amazon SES, Redis or another database to the COVALink st
 | Registration verification and resending the verification link | Supported through SMTP when `REQUIRE_EMAIL_VERIFICATION=true` |
 | Running without email | Supported when `REQUIRE_EMAIL_VERIFICATION=false`; password recovery is then unavailable |
 | Sending through useSend's REST API directly | Not implemented |
-| Newsletter subscriptions, marketing consent and campaigns | Not implemented |
+| Subscriber confirmation for the Subscribe block and the business card's share-back form (double opt-in) | Supported through SMTP; both are hidden from visitors while email isn't configured, `TRUST_PROXY` is off, or the profile owner's email isn't verified |
+| Sending newsletters or campaigns to subscribers | Not implemented: owners export confirmed contacts as CSV for their own email tool |
 
 Verifying an email address proves control of the address. It isn't consent to receive marketing email.
 

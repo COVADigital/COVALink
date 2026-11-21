@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
-import { DESTRUCTIVE_OUTLINE, TOUCH } from "@/components/admin/styles";
+import { TOUCH } from "@/components/admin/styles";
 import { FormAlert, FormField } from "@/components/auth/form-field";
 import {
   AlertDialog,
@@ -23,6 +23,9 @@ import { DELETE_CONFIRMATION } from "@/features/account/schema";
  * Administrators see why they can't delete their account instead of a button
  * that would fail.
  */
+/** Solid red, like the reference; the canvas colour as text keeps 4.5:1 in both modes. */
+const SOLID_DANGER = "rounded-full bg-cl-danger text-cl-canvas hover:bg-cl-danger/90 focus-visible:ring-cl-danger/40";
+
 export function DeleteAccount({ blockedReason }: { blockedReason: string | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -100,7 +103,7 @@ export function DeleteAccount({ blockedReason }: { blockedReason: string | null 
       <p className="text-sm text-muted-foreground">
         Deleting your account permanently removes your profiles, their content, analytics and uploaded images. This can&apos;t be undone.
       </p>
-      <Button ref={openerRef} type="button" variant="outline" className={`w-fit ${TOUCH} ${DESTRUCTIVE_OUTLINE}`} onClick={() => setOpen(true)}>
+      <Button ref={openerRef} type="button" className={`w-fit ${TOUCH} ${SOLID_DANGER}`} onClick={() => setOpen(true)}>
         Delete account…
       </Button>
       <AlertDialog open={open} onOpenChange={close}>
@@ -130,7 +133,7 @@ export function DeleteAccount({ blockedReason }: { blockedReason: string | null 
               <AlertDialogCancel className={TOUCH} disabled={pending}>
                 Cancel
               </AlertDialogCancel>
-              <Button type="submit" variant="outline" className={`${TOUCH} ${DESTRUCTIVE_OUTLINE}`} disabled={pending}>
+              <Button type="submit" className={`${TOUCH} ${SOLID_DANGER}`} disabled={pending}>
                 {pending ? "Deleting…" : "Delete my account"}
               </Button>
             </AlertDialogFooter>

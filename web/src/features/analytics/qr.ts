@@ -11,12 +11,15 @@ import { SOURCE_PARAM } from "./paths";
  * or someone else's profile if the old handle is claimed again).
  */
 
-export function qrTargetUrl(appUrl: string, handle: string): string {
+export function qrTargetUrl(appUrl: string, handle: string, source: "qr" | "card" = "qr"): string {
   if (!isValidHandle(handle)) throw new Error("qrTargetUrl: invalid handle");
   const url = new URL(`/${handle}`, appUrl);
-  url.searchParams.set(SOURCE_PARAM, "qr");
+  url.searchParams.set(SOURCE_PARAM, source);
   return url.toString();
 }
+
+/** The business card's QR target: like `qrTargetUrl`, but `?src=card`, which also opens the card's extras on the page. */
+export const cardTargetUrl = (appUrl: string, handle: string) => qrTargetUrl(appUrl, handle, "card");
 
 /** A standalone SVG document: medium error correction, the standard 4-module quiet zone. */
 export function qrSvg(text: string): string {

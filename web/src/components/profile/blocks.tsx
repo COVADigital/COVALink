@@ -14,7 +14,9 @@ import { getSocialPlatform, socialDestination, socialLinkName } from "@/features
 import { vcardDataUrl, vcardFileNames, vcardPath } from "@/features/blocks/vcard";
 import { Markdown, type MarkdownLinkProps } from "@/lib/markdown";
 import { isMediaUrl } from "@/lib/validation/media";
+import { consentText } from "@/features/audience/consent";
 import { EmbedPlayer } from "./embed-player";
+import { SubscribeForm } from "./subscribe-form";
 
 /**
  * Block renderers shared by the public page and the editor preview.
@@ -37,6 +39,13 @@ export interface RenderContext {
   clickTrackingProfileId?: string;
   /** The theme's social style, used by social blocks set to `inherit` (`theme.social.style`). */
   socialStyle?: "icon" | "pill";
+  /** The profile's display name, quoted in the Subscribe block's consent line. */
+  displayName?: string;
+  /**
+   * Public page only: Subscribe blocks are rendered only when true (email is
+   * configured and the operator allows them). The preview always shows them, inert.
+   */
+  subscribeLive?: boolean;
 }
 
 /** An editor block that doesn't validate yet; rendered as a placeholder in the preview only. */
@@ -222,6 +231,18 @@ const MusicRenderer = ({ config, ctx }: BlockRendererProps<"music">) => <Embed e
 /** Fixed sizes only (`data-size` → globals.css); never focusable or announced. */
 const SpacerRenderer = ({ config }: BlockRendererProps<"spacer">) => <div className="pp-spacer" data-size={config.size} aria-hidden="true" />;
 
+const SubscribeRenderer = ({ block, config, ctx }: BlockRendererProps<"subscribe">) => (
+  <SubscribeForm
+    profileId={ctx.mode === "public" ? ctx.clickTrackingProfileId : undefined}
+    blockId={block.id}
+    title={config.title}
+    description={config.description}
+    buttonLabel={config.buttonLabel}
+    consent={consentText(ctx.displayName ?? "this profile")}
+    inert={ctx.mode !== "public"}
+  />
+);
+
 type RendererMap = { [K in RenderableBlockType]: ComponentType<BlockRendererProps<K>> };
 
 export const BLOCK_RENDERERS: RendererMap = {
@@ -237,6 +258,7 @@ export const BLOCK_RENDERERS: RendererMap = {
   image: ImageRenderer,
   video: VideoRenderer,
   music: MusicRenderer,
+  subscribe: SubscribeRenderer,
 };
 
 function isIncomplete(block: ViewBlock): block is IncompleteBlock {
@@ -255,7 +277,11 @@ function RenderBlock({ block, ctx }: { block: Block; ctx: RenderContext }) {
 }
 
 export function ProfileBlocks({ blocks, ctx }: { blocks: readonly ViewBlock[]; ctx: RenderContext }) {
-  const shown = blocks.filter((b) => isShownPublicly(b) || (ctx.mode === "preview" && b.visible && isIncomplete(b)));
+  const shown = blocks.filter(
+    (b) =>
+      (isShownPublicly(b) && !(ctx.mode === "public" && b.type === "subscribe" && !ctx.subscribeLive)) ||
+      (ctx.mode === "preview" && b.visible && isIncomplete(b)),
+  );
   if (shown.length === 0) return null;
   return (
     <div className="pp-blocks">

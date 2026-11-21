@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { landingSource } from "@/features/analytics/landing-source";
 import { BEACON_PATH, SOURCE_PARAM } from "@/features/analytics/paths";
 
 /**
  * Sends one profile-view beacon after the page has rendered and hydrated;
  * it never delays display. A prerendered page waits until it is
- * actually shown. `?src=qr` is reported as the source and then removed from
+ * actually shown. `?src=qr` or `?src=card` is reported as the source and then removed from
  * the address bar, so a reload or a shared copy isn't attributed to the QR
  * code again. The beacon carries only the profile id, the source and
  * `document.referrer`; it sets and reads no cookies or storage. Visitors
@@ -20,7 +21,8 @@ export function ViewBeacon({ profileId }: { profileId: string }) {
       if (sentFor.current === profileId) return;
       sentFor.current = profileId;
       const params = new URLSearchParams(window.location.search);
-      const source = params.get(SOURCE_PARAM) === "qr" ? "qr" : undefined;
+      const landed = landingSource();
+      const source = landed === "qr" || landed === "card" ? landed : undefined;
       if (params.has(SOURCE_PARAM)) {
         params.delete(SOURCE_PARAM);
         const query = params.toString();

@@ -1,0 +1,1 @@
+CREATE INDEX "audience_contacts_pending_created_idx" ON "audience_contacts" USING btree ("created_at") WHERE "audience_contacts"."status" = 'pending';
