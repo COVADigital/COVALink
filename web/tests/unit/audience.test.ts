@@ -21,7 +21,7 @@ describe("display name in sign-up text", () => {
     expect(plainName("Ada\r\nBcc: x@example.com")).toBe("Ada Bcc: x@example.com");
     expect(plainName(" A\u0000d\ta ")).toBe("A d a");
     expect(consentText("Ada\nLovelace")).toContain("with Ada Lovelace.");
-    expect(plainName("Ada‮ecalevol​")).toBe("Adaecalevol"); // Direction override and zero-width space dropped.
+    expect(plainName("Ada\u202eecalevol\u200b")).toBe("Adaecalevol"); // Direction override and zero-width space dropped.
   });
 });
 

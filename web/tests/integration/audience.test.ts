@@ -221,13 +221,33 @@ describe("subscribe", () => {
       (${crypto.randomUUID()}, ${`covalink:subscribe:profile:${profileId}`}, 60, ${Date.now()}),
       (${crypto.randomUUID()}, 'covalink:subscribe:email:old', 1, ${Date.now() - 2 * 3600_000})`;
     for (let i = 0; i < 5; i++) expect((await subscribe({ email: `n${i}@example.com` }, { ip: `203.0.113.${i}` })).status).toBe(429);
-    expect(await count("covalink:subscribe:email:%")).toBe(1); // Only the old row.
+    // No new email rows; the expired one is already gone, because cleanup runs past the per-visitor limit, not only on success.
+    expect(await count("covalink:subscribe:email:%")).toBe(0);
     expect(sent).toEqual([]);
 
     await testSql()`update rate_limits set last_request = ${Date.now() - 2 * 3600_000} where key = ${`covalink:subscribe:profile:${profileId}`}`;
     expect((await subscribe({ email: "fresh@example.com" }, { ip: "198.51.100.50" })).status).toBe(202);
     expect(sent).toHaveLength(1);
     expect(await count("covalink:subscribe:email:old")).toBe(0);
+  });
+
+  it("the profile id's letter case can't split the limits: keys and the stored sign-up use the canonical id", async () => {
+    const spellings = [profileId.toUpperCase(), profileId, profileId.replace(/[a-f]/, (c) => c.toUpperCase()), profileId.toUpperCase()];
+    for (const [i, p] of spellings.entries()) expect((await subscribe({ p, email: "target@example.com" }, { ip: `203.0.113.${40 + i}` })).status).toBe(202);
+    // Three confirmation emails per address and profile per hour, however the id is spelled.
+    expect(sent).toHaveLength(SUBSCRIBE_LIMITS.perEmail);
+    const keys = ((await testSql()`select key from rate_limits where key like 'covalink:subscribe:profile:%'`) as unknown as { key: string }[]).map((r) => r.key);
+    expect(keys).toEqual([`covalink:subscribe:profile:${profileId}`]);
+    const [row] = (await testSql()`select profile_id::text as p from audience_contacts`) as unknown as { p: string }[];
+    expect(row.p).toBe(profileId);
+  });
+
+  it("while sign-ups are off, requests store no rate-limit rows", async () => {
+    status.subscribeEnabled = false;
+    for (let i = 0; i < 3; i++) expect((await subscribe({ email: `off${i}@example.com` }, { ip: `203.0.113.${60 + i}` })).status).toBe(202);
+    const [{ n }] = (await testSql()`select count(*)::int as n from rate_limits where key like 'covalink:subscribe:%'`) as unknown as { n: number }[];
+    expect(n).toBe(0);
+    expect(sent).toEqual([]);
   });
 });
 
@@ -252,7 +272,7 @@ describe("business card sign-ups", () => {
 
   it("store the name, a canonical phone and the note with source card, and confirm by email like a Subscribe block", async () => {
     await setCard(CARD);
-    const res = await cardSignup({ email: "V@Example.com", name: " Vera‮ Visitor ", phone: "+1 (555) 010-0200", note: "Met at​ the fair\nCall me" });
+    const res = await cardSignup({ email: "V@Example.com", name: " Vera\u202e Visitor ", phone: "+1 (555) 010-0200", note: "Met at\u200b the fair\nCall me" });
     expect(res.status).toBe(202);
     expect(await cardRows()).toEqual([
       {

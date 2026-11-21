@@ -122,14 +122,21 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   // Sign-ups need a per-visitor limit, so without a trusted client address (TRUST_PROXY off) none are taken.
   const address = trustedClientAddress(request.headers, deps.trustProxy ?? env().TRUST_PROXY);
   if (!address) return accepted;
+  // Checked before anything is stored, so an installation with sign-ups off keeps no per-visitor rows.
+  if (!(await subscribeStatus()).live) return accepted;
   // Refused attempts don't restart these windows, so a trickle of attempts can't keep sign-ups closed.
   const fixed = { refusedExtend: false };
   if (!(await consumeAttempt(`subscribe:client:${limitKey(address)}`, w, perClient, fixed))) return json(429);
 
-  if (!(await subscribeStatus()).live) return accepted;
   const live = await getLiveProfileById(profileId);
   const published = live ? await getPublishedDocument(live) : null;
   if (!live || !published) return accepted;
+  // Expired limit rows go on every request for a live profile, not only on a successful sign-up, so rows from visitors
+  // whose requests are later dropped don't pile up; requests for unknown profiles don't trigger the table scan. A failed
+  // cleanup doesn't block the request.
+  await purgeAttempts("subscribe:", w).catch((err: unknown) =>
+    logger.error({ err: err instanceof Error ? err.name : "unknown" }, "Purging sign-up limit rows failed"),
+  );
   // The card's form is open only while its share-back switch is on; its consent line names the card.
   const card = blockId ? null : await getCard(live.id, published.header.displayName);
   if (blockId) {
@@ -140,17 +147,16 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
 
   // The per-address limit is silent, so it reveals nothing. It is read first, so repeats of one address don't use up
   // the shared limits, and counted only after them, so new rows stay within the installation-wide limit.
-  const emailKey = `subscribe:email:${limitKey(`${profileId}\u0000${email}`)}`;
+  const emailKey = `subscribe:email:${limitKey(`${live.id}\u0000${email}`)}`;
   if ((await attemptsUsed(emailKey, w)) >= perEmail) return accepted;
-  if (!(await consumeAttempt(`subscribe:profile:${profileId}`, w, perProfile, fixed))) return json(429);
+  if (!(await consumeAttempt(`subscribe:profile:${live.id}`, w, perProfile, fixed))) return json(429);
   if (!(await consumeAttempt("subscribe:global", w, global, fixed))) return json(429);
   if (!(await consumeAttempt(emailKey, w, perEmail, fixed))) return accepted;
 
   const name = plainName(card ? card.displayName : published.header.displayName);
   try {
-    await purgeAttempts("subscribe:", w);
     const consent = card ? cardConsentText(name) : consentText(name);
-    const tokens = await recordSignup({ profileId, blockId, name: visitorName, ...details, email, consentText: consent });
+    const tokens = await recordSignup({ profileId: live.id, blockId, name: visitorName, ...details, email, consentText: consent });
     if (tokens) {
       const confirmUrl = tokenLink("/subscribe/confirm", tokens.confirmToken);
       const removeUrl = tokenLink("/subscribe/remove", tokens.removeToken);

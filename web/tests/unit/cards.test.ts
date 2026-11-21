@@ -13,7 +13,7 @@ describe("business card", () => {
   });
 
   it("escapes the name, drops control and format characters, and cuts long text with an ellipsis", () => {
-    const svg = cardSvg({ ...base, displayName: 'A<b>&"c"‮\nx', color: CARD_COLORS[0].hex });
+    const svg = cardSvg({ ...base, displayName: 'A<b>&"c"\u202e\nx', color: CARD_COLORS[0].hex });
     expect(svg).toContain("A&lt;b&gt;&amp;&quot;c&quot; x");
     expect(svg).not.toMatch(/<script|on\w+=|href=|<foreignObject|<style|<b>/i);
     expect(cardSvg({ ...base, displayName: "x".repeat(60), color: CARD_COLORS[0].hex })).toContain(`${"x".repeat(21)}…`);
@@ -36,7 +36,7 @@ describe("business card", () => {
   });
 
   it("falls back to the profile name and the first colour when nothing valid is saved", () => {
-    expect(readCard(null, "Alice‮")).toEqual({ displayName: "Alice", color: CARD_COLORS[0].hex, shareBack: false, saveContact: false });
+    expect(readCard(null, "Alice\u202e")).toEqual({ displayName: "Alice", color: CARD_COLORS[0].hex, shareBack: false, saveContact: false });
     expect(readCard({ displayName: "Bo", color: "#000000" }, "Alice").displayName).toBe("Alice");
     expect(readCard({ displayName: "Bo", color: "#b91c1c" }, "Alice")).toEqual({ displayName: "Bo", color: "#b91c1c", shareBack: false, saveContact: false });
   });
