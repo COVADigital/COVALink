@@ -1,6 +1,9 @@
 import "server-only";
 import { sql } from "drizzle-orm";
-import { db } from "@/db";
+import { db, type Tx } from "@/db";
+
+/** The pool, or a transaction to run inside. */
+type Exec = Pick<Tx, "execute">;
 
 /**
  * Counts an attempt against `key` in the `rate_limits` table Better Auth
@@ -21,13 +24,13 @@ export async function consumeAttempt(
   key: string,
   windowSeconds: number,
   max: number,
-  { refusedExtend = true }: { refusedExtend?: boolean } = {},
+  { refusedExtend = true, exec = db }: { refusedExtend?: boolean; exec?: Exec } = {},
 ): Promise<boolean> {
   const now = Date.now();
   const cutoff = now - windowSeconds * 1000;
   // In a fixed window `last_request` is the window's start.
   const keep = refusedExtend ? sql`false` : sql`rate_limits.last_request >= ${cutoff}`;
-  const rows = await db.execute<{ count: number }>(sql`
+  const rows = await exec.execute<{ count: number }>(sql`
     insert into rate_limits (id, key, count, last_request)
     values (${crypto.randomUUID()}, ${`covalink:${key}`}, 1, ${now})
     on conflict (key) do update set
@@ -38,9 +41,9 @@ export async function consumeAttempt(
 }
 
 /** Attempts counted against `key` in the current window, without counting one or creating a row. */
-export async function attemptsUsed(key: string, windowSeconds: number): Promise<number> {
+export async function attemptsUsed(key: string, windowSeconds: number, exec: Exec = db): Promise<number> {
   const cutoff = Date.now() - windowSeconds * 1000;
-  const rows = await db.execute<{ count: number }>(sql`
+  const rows = await exec.execute<{ count: number }>(sql`
     select count from rate_limits where key = ${`covalink:${key}`} and last_request >= ${cutoff}`);
   return Number(rows[0]?.count ?? 0);
 }

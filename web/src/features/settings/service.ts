@@ -72,7 +72,7 @@ export async function getSetting<K extends SettingKey>(key: K): Promise<SettingV
 /**
  * Advisory-lock class reserved for setting writes (two-int form: class, then
  * `hashtext(key)`). Other classes: 727_001 migrations, 727_002 bootstrap and
- * analytics ingest, 727_003 analytics purge.
+ * analytics ingest, 727_003 analytics purge, 727_005 sign-up sender admission.
  */
 const SETTING_LOCK_CLASS = 727_004;
 

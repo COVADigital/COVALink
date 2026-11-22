@@ -119,6 +119,24 @@ describe("subscribe", () => {
     expect(await rows()).toEqual([expect.objectContaining({ status: "confirmed" })]);
   });
 
+  it("an inbox's quota is counted the same whether or not the address is confirmed, so it can't reveal list membership", async () => {
+    await publishBobSubscribe();
+    const bobRows = async () => ((await testSql()`select count(*)::int as n from audience_contacts where profile_id = ${bobProfileId}`)[0] as { n: number }).n;
+    // Confirmed on Alice's page: one sign-up and two repeats.
+    await subscribe({ email: "c@example.com" }, { ip: "203.0.113.1" });
+    await confirm(tokenFrom(sent[0], "confirm"));
+    for (let i = 0; i < SUBSCRIBE_LIMITS.perRecipient - 1; i++) await subscribe({ email: "c@example.com" }, { ip: `203.0.113.${2 + i}` });
+    // Never confirmed: the same three sign-ups.
+    for (let i = 0; i < SUBSCRIBE_LIMITS.perRecipient; i++) await subscribe({ email: "u@example.com" }, { ip: `203.0.113.${10 + i}` });
+    sent = [];
+    // On Bob's page both addresses now look the same: no email, no row.
+    for (const email of ["c@example.com", "u@example.com"]) {
+      expect((await subscribe({ email, p: bobProfileId }, { ip: "203.0.113.50" })).status).toBe(202);
+    }
+    expect(sent).toEqual([]);
+    expect(await bobRows()).toBe(0);
+  });
+
   it("a repeated pending sign-up replaces its tokens, so only the newest link confirms", async () => {
     await subscribe({ email: "v@example.com" });
     await subscribe({ email: "v@example.com" });
@@ -178,6 +196,65 @@ describe("subscribe", () => {
     expect((await subscribe({ email: "g@example.com" })).status).toBe(202);
     expect(await rows()).toEqual([]);
     expect(sent).toEqual([]);
+    // Requests that can't sign anyone up leave no rate-limit records either.
+    const [{ n }] = (await testSql()`select count(*)::int as n from rate_limits where key like 'covalink:subscribe%'`) as unknown as { n: number }[];
+    expect(n).toBe(0);
+  });
+
+  it("a hidden block or an unverified owner adds no rate-limit records", async () => {
+    expect((await subscribe({ email: "a@example.com", b: ID(2) }, { ip: "203.0.113.1" })).status).toBe(202);
+    await testSql()`update users set email_verified = false where id = ${alice}`;
+    expect((await subscribe({ email: "b@example.com" }, { ip: "2001:db8:5::1" })).status).toBe(202);
+    const [{ n }] = (await testSql()`select count(*)::int as n from rate_limits where key like 'covalink:subscribe%'`) as unknown as { n: number }[];
+    expect(n).toBe(0);
+  });
+
+  it("new visitors share an installation-wide hourly budget; visitors already seen this hour don't use it", async () => {
+    expect((await subscribe({ email: "seen@example.com" }, { ip: "203.0.113.10" })).status).toBe(202);
+    await testSql()`update rate_limits set count = ${SUBSCRIBE_LIMITS.newVisitors} where key = 'covalink:subscribe:new-visitors'`;
+    expect((await subscribe({ email: "new@example.com" }, { ip: "203.0.113.11" })).status).toBe(429);
+    expect((await subscribe({ email: "new6@example.com" }, { ip: "2001:db8:7::1" })).status).toBe(429);
+    expect((await subscribe({ email: "again@example.com" }, { ip: "203.0.113.10" })).status).toBe(202);
+    const keys = ((await testSql()`select key from rate_limits where key like 'covalink:subscribe:client:%' or key like 'covalink:subscribe:site:%'`) as unknown as { key: string }[]);
+    expect(keys).toHaveLength(1);
+  });
+
+  it("one IPv6 /48 rotating through /64s uses one unit of the new-visitor budget", async () => {
+    for (let i = 0; i < SUBSCRIBE_LIMITS.perSite + 30; i++) {
+      await subscribe({ email: `r${i}@example.com` }, { ip: `2001:db8:3:${i.toString(16)}::1` });
+    }
+    const [row] = (await testSql()`select count from rate_limits where key = 'covalink:subscribe:new-visitors'`) as unknown as { count: number }[];
+    expect(Number(row.count)).toBe(1);
+    expect((await subscribe({ email: "other@example.com" }, { ip: "2001:db8:4::1" })).status).toBe(202);
+  });
+
+  it("a burst of simultaneous requests from one new sender uses one unit of the new-visitor budget", async () => {
+    const burst = (ip: string) => Promise.all(Array.from({ length: 20 }, (_, i) => subscribe({ email: `b${i}@example.com` }, { ip })));
+    await burst("203.0.113.30");
+    await burst("2001:db8:6::1");
+    const [row] = (await testSql()`select count from rate_limits where key = 'covalink:subscribe:new-visitors'`) as unknown as { count: number }[];
+    expect(Number(row.count)).toBe(2);
+  });
+
+  it("a burst from a sender whose record has expired also uses one unit of the budget", async () => {
+    expect((await subscribe({ email: "early@example.com" }, { ip: "203.0.113.40" })).status).toBe(202);
+    // An hour later: the sender's record and the budget's window have both expired, but the rows are still there.
+    await testSql()`update rate_limits set last_request = ${Date.now() - 2 * 3600_000} where key like 'covalink:subscribe:%'`;
+    await Promise.all(Array.from({ length: 20 }, (_, i) => subscribe({ email: `late${i}@example.com` }, { ip: "203.0.113.40" })));
+    const [row] = (await testSql()`select count from rate_limits where key = 'covalink:subscribe:new-visitors'`) as unknown as { count: number }[];
+    expect(Number(row.count)).toBe(1);
+    const [{ n }] = (await testSql()`select count(*)::int as n from rate_limits where key like 'covalink:subscribe:client:%'`) as unknown as { n: number }[];
+    expect(n).toBe(1);
+  });
+
+  it("expired records are cleaned up when a new visitor arrives, not on every request", async () => {
+    const old = async () => ((await testSql()`select count(*)::int as n from rate_limits where key = 'covalink:subscribe:to:old'`)[0] as { n: number }).n;
+    expect((await subscribe({ email: "first@example.com" }, { ip: "203.0.113.20" })).status).toBe(202);
+    await testSql()`insert into rate_limits (id, key, count, last_request) values (${crypto.randomUUID()}, 'covalink:subscribe:to:old', 1, ${Date.now() - 2 * 3600_000})`;
+    expect((await subscribe({ email: "second@example.com" }, { ip: "203.0.113.20" })).status).toBe(202);
+    expect(await old()).toBe(1);
+    expect((await subscribe({ email: "third@example.com" }, { ip: "203.0.113.21" })).status).toBe(202);
+    expect(await old()).toBe(0);
   });
 
   it("refuses cross-site, non-JSON, oversized and malformed requests", async () => {

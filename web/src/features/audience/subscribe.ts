@@ -1,6 +1,8 @@
 import "server-only";
 import { createHmac } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
+import { db } from "@/db";
 import { attemptsUsed, consumeAttempt, purgeAttempts } from "@/features/account/throttle";
 import { readBounded } from "@/features/analytics/beacon";
 import { isBot } from "@/features/analytics/classify";
@@ -57,7 +59,12 @@ export const SUBSCRIBE_LIMITS = {
   perOwnerDay: 200,
   perSenderOwnerDay: 20,
   perRecipientDay: 10,
+  /** Senders (IPv4 addresses or IPv6 /48s) not seen this hour, for the installation: bounds new limit records. */
+  newVisitors: 2000,
 };
+
+/** Advisory-lock class for admitting a sender (the list of classes is in features/settings/service.ts). */
+const SENDER_LOCK_CLASS = 727_005;
 
 /** The recipient's limit key: `+tag`s address one inbox under many names. Only the key; the address is stored and sent as typed. */
 export const recipientKey = (email: string) => email.replace(/\+[^@]*(?=@[^@]*$)/, "");
@@ -149,33 +156,49 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   if (!address) return accepted;
   // Checked before anything is stored, so an installation with sign-ups off keeps no per-visitor rows.
   if (!(await subscribeStatus()).live) return accepted;
-  // Nor do requests for unknown or unpublished profiles: every row written below is followed by the purge.
+  // Nor do requests for unknown or unpublished profiles.
   const live = await getLiveProfileById(profileId);
   const published = live ? await getPublishedDocument(live) : null;
   if (!live || !published) return accepted;
 
-  // Fixed windows: refused attempts don't move them, so a trickle of attempts can't keep sign-ups closed.
-  const fixed = { refusedExtend: false };
-  // While the installation is full, nothing is counted, so retries don't extend a visitor's or an owner's windows.
-  if ((await attemptsUsed("subscribe:global", w)) >= L.global) return json(429);
-  // One site rotating through its /64s still shares one /48 limit. It goes first, so once it refuses, new /64s add no
-  // rows; a refused request only counts on an existing row, which is why skipping the purge below costs nothing.
-  const site = ipv6Site(address);
-  if (site && !(await consumeAttempt(`subscribe:site:${limitKey(site)}`, w, L.perSite, fixed))) return json(429);
-  if (!(await consumeAttempt(`subscribe:client:${limitKey(address)}`, w, L.perClient, fixed))) return json(429);
-  // Expired limit rows go on every request for a live profile that passes the per-visitor limits, not only on a
-  // successful sign-up, so rows from visitors whose requests are later dropped don't pile up. A failed cleanup doesn't
-  // block the request.
-  await Promise.all([purgeAttempts("subscribe:", w), purgeAttempts("subscribe-day:", L.daySeconds)]).catch((err: unknown) =>
-    logger.error({ err: err instanceof Error ? err.name : "unknown" }, "Purging sign-up limit rows failed"),
-  );
-  // The card's form is open only while its share-back switch is on; its consent line names the card.
+  // The card's form is open only while its share-back switch is on; its consent line names the card. Like the checks
+  // above these only read, so a request that can't sign anyone up writes nothing.
   const card = blockId ? null : await getCard(live.id, published.header.displayName);
   if (blockId) {
     const block = published.blocks.find((b) => b.id === blockId);
     if (!block || block.type !== "subscribe" || !block.visible) return accepted;
   } else if (!card?.shareBack || !visitorName) return accepted;
   if (!(await ownerVerified(live.ownerId))) return accepted;
+
+  // Fixed windows: refused attempts don't move them, so a trickle of attempts can't keep sign-ups closed.
+  const fixed = { refusedExtend: false };
+  // While the installation is full, nothing is counted, so retries don't extend a visitor's or an owner's windows.
+  if ((await attemptsUsed("subscribe:global", w)) >= L.global) return json(429);
+  // A sender not seen this hour (an IPv4 address, or an IPv6 /48) counts against an installation-wide budget of new
+  // senders, which bounds the table's growth; expired rows are cleaned up only then, so cleanup runs no more often than
+  // senders arrive. New /64s inside a known /48 don't count: its own limit (checked next, before its /64's row) caps
+  // them at 20 an hour, so one /48 can't drain the budget by rotating /64s. A refused request only counts on an
+  // existing row.
+  const site = ipv6Site(address);
+  const siteKey = site && `subscribe:site:${limitKey(site)}`;
+  const clientKey = `subscribe:client:${limitKey(address)}`;
+  const senderKey = siteKey || clientKey;
+  // Deciding "new" and writing the sender's row happen under a lock on that sender, so a burst of simultaneous
+  // requests from one new sender uses one unit of the budget, not one each.
+  const admission = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${SENDER_LOCK_CLASS}::int, hashtext(${senderKey}))`);
+    const isNew = (await attemptsUsed(senderKey, w, tx)) === 0;
+    if (isNew && !(await consumeAttempt("subscribe:new-visitors", w, L.newVisitors, { ...fixed, exec: tx }))) return "full";
+    const within = await consumeAttempt(senderKey, w, siteKey ? L.perSite : L.perClient, { ...fixed, exec: tx });
+    return !within ? "full" : isNew ? "new" : "known";
+  });
+  if (admission === "full") return json(429);
+  if (admission === "new") {
+    await Promise.all([purgeAttempts("subscribe:", w), purgeAttempts("subscribe-day:", L.daySeconds)]).catch((err: unknown) =>
+      logger.error({ err: err instanceof Error ? err.name : "unknown" }, "Purging sign-up limit rows failed"),
+    );
+  }
+  if (siteKey && !(await consumeAttempt(clientKey, w, L.perClient, fixed))) return json(429);
 
   // The shared limits answer 429 the same for every address, so they run before the per-recipient limit, which is
   // silent: checking it first would let a full shared limit reveal which addresses signed up recently. Recipient rows
@@ -191,6 +214,10 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   const to = limitKey(recipientKey(email));
   const hour = `subscribe:to:${to}`;
   const day = `subscribe-day:to:${to}`;
+  // Counted for every sign-up that gets this far, also when the address is already confirmed and no email goes out.
+  // Skipping confirmed addresses would make this installation-wide quota depend on whether an address is on some
+  // page's list, which anyone could then probe from their own page; filling an inbox's quota is the documented
+  // recipient-lockout trade-off either way.
   if ((await attemptsUsed(hour, w)) >= L.perRecipient || (await attemptsUsed(day, L.daySeconds)) >= L.perRecipientDay) return accepted;
   const [inHour, inDay] = await Promise.all([
     consumeAttempt(hour, w, L.perRecipient, fixed),
@@ -237,11 +264,18 @@ export async function handleSubscribeToken(request: Request, action: "confirm" |
   if ("refusal" in read) return read.refusal;
   const parsed = tokenSchema.safeParse(read.body);
   if (!parsed.success || (parsed.data.preview && action !== "confirm")) return json(400, { ok: false });
+  // A database error answers 503, which the page offers to retry; 410 means the lookup ran and found no usable token.
+  const failed = (err: unknown) => {
+    logger.error({ err: err instanceof Error ? err.name : "unknown", action }, "Subscribe link lookup failed");
+    return "failed" as const;
+  };
   if (parsed.data.preview) {
-    const found = await previewSignup(parsed.data.token).catch(() => null);
+    const found = await previewSignup(parsed.data.token).catch(failed);
+    if (found === "failed") return json(503, { ok: false });
     if (!found) return json(410, { ok: false });
     return json(200, { ok: true, page: pageName(found.handle), name: found.name, phone: found.phone, note: found.note });
   }
-  const ok = await (action === "confirm" ? confirmSignup : removeSignup)(parsed.data.token).catch(() => false);
+  const ok = await (action === "confirm" ? confirmSignup : removeSignup)(parsed.data.token).catch(failed);
+  if (ok === "failed") return json(503, { ok: false });
   return json(ok ? 200 : 410, { ok });
 }
