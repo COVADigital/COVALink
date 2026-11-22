@@ -28,6 +28,14 @@ export async function recordSignup(input: {
   note?: string;
   email: string;
   consentText: string;
+  /**
+   * False when no email will go out (the recipient is over quota): an existing pending sign-up keeps its tokens and
+   * details, so links already emailed keep working, but what its owner sees (source, time) changes exactly as for a
+   * sign-up that is emailed, so the owner can't tell the two apart. A new address is stored as pending either way.
+   * Accepted side effects: the refreshed time also restarts the 48 hours, and the source can change while the stored
+   * consent wording stays the one the visitor saw.
+   */
+  rotate?: boolean;
 }): Promise<{ confirmToken: string; removeToken: string } | null> {
   const confirmToken = newToken();
   const removeToken = newToken();
@@ -51,7 +59,7 @@ export async function recordSignup(input: {
       .values({ profileId: input.profileId, email: input.email, status: "pending", ...values })
       .onConflictDoUpdate({
         target: [audienceContacts.profileId, audienceContacts.email],
-        set: values,
+        set: input.rotate === false ? { source: values.source, blockId: values.blockId, createdAt: values.createdAt } : values,
         setWhere: sql`${audienceContacts.status} = 'pending'`,
       })
       .returning({ id: audienceContacts.id });

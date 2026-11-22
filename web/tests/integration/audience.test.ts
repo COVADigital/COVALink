@@ -129,12 +129,35 @@ describe("subscribe", () => {
     // Never confirmed: the same three sign-ups.
     for (let i = 0; i < SUBSCRIBE_LIMITS.perRecipient; i++) await subscribe({ email: "u@example.com" }, { ip: `203.0.113.${10 + i}` });
     sent = [];
-    // On Bob's page both addresses now look the same: no email, no row.
+    // On Bob's page both addresses now look the same: no email, a pending row each.
     for (const email of ["c@example.com", "u@example.com"]) {
       expect((await subscribe({ email, p: bobProfileId }, { ip: "203.0.113.50" })).status).toBe(202);
     }
     expect(sent).toEqual([]);
-    expect(await bobRows()).toBe(0);
+    expect(await bobRows()).toBe(2);
+  });
+
+  it("an owner's list looks the same whether or not an address's quota is used up, and earlier links keep working", async () => {
+    await publishBobSubscribe();
+    // "busy" uses up its quota on Bob's page; "idle" has none used.
+    for (let i = 0; i < SUBSCRIBE_LIMITS.perRecipient; i++) await subscribe({ email: "busy@example.com", p: bobProfileId }, { ip: `203.0.113.${i}` });
+    const lastLink = tokenFrom(sent.at(-1)!, "confirm");
+    sent = [];
+    for (const email of ["busy@example.com", "idle@example.com"]) await subscribe({ email }, { ip: "203.0.113.60" });
+    expect(sent.map((m) => m.to)).toEqual(["idle@example.com"]);
+    const listed = await listContacts(alice, profileId);
+    expect(listed.map((c) => [c.email, c.status, c.source]).sort()).toEqual([
+      ["b•••@example.com", "pending", "block"],
+      ["i•••@example.com", "pending", "block"],
+    ]);
+    // An existing pending sign-up repeated over quota: its time moves as usual, but its emailed link still confirms.
+    const [{ created_at: before }] = (await testSql()`select created_at from audience_contacts where profile_id = ${bobProfileId} and email = 'busy@example.com'`) as unknown as { created_at: Date }[];
+    sent = [];
+    await subscribe({ email: "busy@example.com", p: bobProfileId }, { ip: "203.0.113.61" });
+    const [{ created_at: after }] = (await testSql()`select created_at from audience_contacts where profile_id = ${bobProfileId} and email = 'busy@example.com'`) as unknown as { created_at: Date }[];
+    expect(after.getTime()).toBeGreaterThan(before.getTime());
+    expect(sent).toEqual([]);
+    expect((await confirm(lastLink)).status).toBe(200);
   });
 
   it("a repeated pending sign-up replaces its tokens, so only the newest link confirms", async () => {

@@ -48,10 +48,10 @@ export function CardExtras({ profileId, saved, shareBackNote }: { profileId: str
   const [status, setStatus] = useState("");
   const [pending, startTransition] = useTransition();
 
-  function save(patch: Patch, done: string, after?: () => void) {
+  function save(patch: Patch, done: string, after?: () => void, expectSaveContact?: boolean) {
     setError(null);
     startTransition(async () => {
-      const res = await saveCardAction({ profileId, patch }).catch(() => null);
+      const res = await saveCardAction({ profileId, patch, expectSaveContact }).catch(() => null);
       if (!res?.ok) {
         setFieldErrors(res?.fieldErrors ?? {});
         setError(res?.error ?? "Couldn't reach the server. Check your connection and try again.");
@@ -69,7 +69,8 @@ export function CardExtras({ profileId, saved, shareBackNote }: { profileId: str
     e.preventDefault();
     const contact = { label: "Save contact", ...values };
     const done = turnOn || card.saveContact ? "Contact details saved. Visitors can now save them." : "Contact details saved. Save contact is still off.";
-    save({ contact, ...(turnOn && { saveContact: true }) }, done, () => setEditing(false));
+    // A details-only save states the switch it showed, so the server refuses if another tab changed it meanwhile.
+    save({ contact, ...(turnOn && { saveContact: true }) }, done, () => setEditing(false), turnOn ? undefined : card.saveContact);
   }
 
   const row = "grid gap-3 rounded-cl-lg border border-cl-line bg-cl-surface p-4";

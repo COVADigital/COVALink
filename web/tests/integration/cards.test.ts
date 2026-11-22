@@ -67,6 +67,20 @@ describe("business card", () => {
     expect((await stored()).card).toMatchObject({ color: "#1e3a8a", contact: { firstName: "Alice", email: "alice@example.com" } });
   });
 
+  it("a details-only save is refused when Save contact changed since the form loaded, and saves nothing", async () => {
+    as(alice);
+    const contact = { label: "Save contact", firstName: "Alice", email: "alice@example.com" };
+    await saveCardAction({ profileId, patch: { contact } });
+    // Another tab turns Save contact on; this tab's form still shows it off.
+    await saveCardAction({ profileId, patch: { saveContact: true } });
+    const stale = await saveCardAction({ profileId, patch: { contact: { ...contact, firstName: "Changed" } }, expectSaveContact: false });
+    expect(stale).toMatchObject({ ok: false, code: "CONFLICT" });
+    expect((await stored()).card).toMatchObject({ saveContact: true, contact: { firstName: "Alice" } });
+    // With the current state, it saves.
+    const fresh = await saveCardAction({ profileId, patch: { contact: { ...contact, firstName: "Changed" } }, expectSaveContact: true });
+    expect(fresh).toMatchObject({ ok: true, data: { saveContact: true, contact: { firstName: "Changed" } } });
+  });
+
   it("serves the card's vCard only while Save contact is on and the profile is live", async () => {
     const vcard = () => GET_VCARD(new Request(`${TEST_APP_URL}/api/vcard/${profileId}/card`), { params: Promise.resolve({ profileId }) } as RouteContext<"/api/vcard/[profileId]/card">);
     as(alice);

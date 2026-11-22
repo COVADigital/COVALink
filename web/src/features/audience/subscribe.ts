@@ -218,12 +218,13 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   // Skipping confirmed addresses would make this installation-wide quota depend on whether an address is on some
   // page's list, which anyone could then probe from their own page; filling an inbox's quota is the documented
   // recipient-lockout trade-off either way.
-  if ((await attemptsUsed(hour, w)) >= L.perRecipient || (await attemptsUsed(day, L.daySeconds)) >= L.perRecipientDay) return accepted;
-  const [inHour, inDay] = await Promise.all([
-    consumeAttempt(hour, w, L.perRecipient, fixed),
-    consumeAttempt(day, L.daySeconds, L.perRecipientDay, fixed),
-  ]);
-  if (!inHour || !inDay) return accepted;
+  // Over quota, the sign-up is still recorded (without replacing an earlier one's tokens) but nothing is sent, so the
+  // owner's list looks the same whether or not this address's installation-wide quota is used up.
+  const within = (await attemptsUsed(hour, w)) < L.perRecipient && (await attemptsUsed(day, L.daySeconds)) < L.perRecipientDay;
+  const counted = within
+    ? await Promise.all([consumeAttempt(hour, w, L.perRecipient, fixed), consumeAttempt(day, L.daySeconds, L.perRecipientDay, fixed)])
+    : [false];
+  const send = counted.every(Boolean);
 
   // The email names the page by its address, not the owner-typed display or card name, so an account can't use the
   // form to deliver its own text to arbitrary inboxes. The stored consent wording keeps the name the visitor saw.
@@ -231,8 +232,8 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   try {
     const name = plainName(card ? card.displayName : published.header.displayName);
     const consent = card ? cardConsentText(name) : consentText(name);
-    const tokens = await recordSignup({ profileId: live.id, blockId, name: visitorName, ...details, email, consentText: consent });
-    if (tokens) {
+    const tokens = await recordSignup({ profileId: live.id, blockId, name: visitorName, ...details, email, consentText: consent, rotate: send });
+    if (tokens && send) {
       const confirmUrl = tokenLink("/subscribe/confirm", tokens.confirmToken);
       const removeUrl = tokenLink("/subscribe/remove", tokens.removeToken);
       const content = actionEmail({

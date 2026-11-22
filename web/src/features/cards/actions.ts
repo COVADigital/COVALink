@@ -10,7 +10,8 @@ import type { ActionResult } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { cardPatchSchema, cardSchema, readCard, type CardSettings } from "./card";
 
-const input = z.object({ profileId: z.uuid(), patch: z.unknown() }).strict();
+/** `expectSaveContact`: the Save contact state the caller's form showed; a mismatch means another tab changed it. */
+const input = z.object({ profileId: z.uuid(), patch: z.unknown(), expectSaveContact: z.boolean().optional() }).strict();
 
 /** `contact.firstName` → `firstName`, so the form can show the error on its field. */
 function fieldErrors(error: z.ZodError): Record<string, string[]> {
@@ -40,6 +41,12 @@ export async function saveCardAction(raw: unknown): Promise<ActionResult<CardSet
       const [row] = await tx.select({ card: profiles.card, draft: profiles.draft, label: profiles.label }).from(profiles).where(where).for("update");
       if (!row) return { ok: false, error: "That profile couldn't be found.", code: "NOT_FOUND" } as const;
       const current = readCard(row.card, readDocument(row.draft, row.label).doc.header.displayName);
+      // Details edited while the form showed Save contact off must not go public because another tab turned it on.
+      const expected = outer.data.expectSaveContact;
+      if (expected !== undefined && current.saveContact !== expected) {
+        const error = "Save contact was changed in another tab. Reload the page to review it before saving.";
+        return { ok: false, error, code: "CONFLICT" } as const;
+      }
       const next = cardSchema.safeParse({ ...current, ...patch.data });
       if (!next.success) return { ok: false, error: next.error.issues[0]?.message ?? "Check the highlighted fields.", fieldErrors: fieldErrors(next.error) } as const;
       await tx.update(profiles).set({ card: next.data }).where(where);
