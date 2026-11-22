@@ -8,12 +8,12 @@ import { getLiveProfileById, getPublishedDocument } from "@/features/profiles/pu
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { actionEmail, dispatchMail, tokenLink, type MailMessage } from "@/lib/mail";
-import { trustedClientAddress } from "@/lib/security/client-address";
+import { ipv6Site, trustedClientAddress } from "@/lib/security/client-address";
 import { isSameOrigin } from "@/lib/security/origin";
 import { canonicalPhone, hasControlChars, hasControlCharsExceptLf } from "@/features/blocks/contact-points";
 import { getCard } from "@/features/cards/service";
 import { cardConsentText, consentText, plainName } from "./consent";
-import { confirmSignup, recordSignup, removeSignup } from "./service";
+import { confirmSignup, previewSignup, recordSignup, removeSignup } from "./service";
 import { ownerVerified, subscribeStatus } from "./status";
 
 /**
@@ -29,17 +29,38 @@ export const limitKey = (value: string) => {
  * The anonymous Subscribe endpoints. Like the view beacon, they accept only
  * same-origin JSON with a small body. `POST /api/subscribe` answers every
  * accepted request with the same 202, whether the address was new, pending,
- * already confirmed, a honeypot hit, a bot, over the per-address limit, the card's share-back is off, the
+ * already confirmed, a honeypot hit, a bot, over the per-recipient limit, the card's share-back is off, the
  * block is gone, its owner's email isn't verified, or the server can't tell
  * visitors apart (no trusted client address), so it can't be used to
- * learn who is subscribed. Only the client-, profile- and installation-wide
- * rate limits answer 429.
+ * learn who is subscribed. Only the client, site, profile, owner and installation-wide
+ * rate limits answer 429, and none of them depends on the address.
  */
 
-export const MAX_SUBSCRIBE_BYTES = 2048;
+/** Every field at its schema maximum, at 3 UTF-8 bytes per UTF-16 unit (CJK), fits with room to spare. */
+export const MAX_SUBSCRIBE_BYTES = 8192;
 
-/** Sign-ups per window: per trusted client address, per profile, for the installation, per email address. */
-export const SUBSCRIBE_LIMITS = { windowSeconds: 3600, perClient: 10, perProfile: 60, global: 600, perEmail: 3 };
+/**
+ * Sign-ups per window (fixed, from the first attempt): per trusted client address (/64 for IPv6), per IPv6 /48 site,
+ * per profile, per owner across their profiles, for the installation, and confirmation emails per recipient (across
+ * profiles, `+tag` ignored). Owner and recipient also have a daily cap, and one sender (IPv4 address or IPv6 /48) a
+ * daily cap per owner.
+ */
+export const SUBSCRIBE_LIMITS = {
+  windowSeconds: 3600,
+  perClient: 10,
+  perSite: 20,
+  perProfile: 60,
+  perOwner: 60,
+  global: 600,
+  perRecipient: 3,
+  daySeconds: 86400,
+  perOwnerDay: 200,
+  perSenderOwnerDay: 20,
+  perRecipientDay: 10,
+};
+
+/** The recipient's limit key: `+tag`s address one inbox under many names. Only the key; the address is stored and sent as typed. */
+export const recipientKey = (email: string) => email.replace(/\+[^@]*(?=@[^@]*$)/, "");
 
 const emailField = z.string().max(320).trim().toLowerCase().pipe(z.email().max(254));
 
@@ -78,7 +99,10 @@ const subscribeSchema = z.union([
     .strict(),
 ]);
 
-const tokenSchema = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).strict();
+const tokenSchema = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), preview: z.literal(true).optional() }).strict();
+
+/** How emails and the confirm page name a profile: `host/handle`, never owner-typed text. */
+const pageName = (handle: string) => `${new URL(env().APP_URL).host}/${handle}`;
 
 const json = (status: number, body?: object) =>
   new Response(body ? JSON.stringify(body) : null, {
@@ -118,23 +142,31 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   const details = "c" in parsed.data ? { phone: parsed.data.phone || undefined, note: parsed.data.note || undefined } : {};
 
   if (hp || isBot(request.headers.get("user-agent"))) return accepted;
-  const { windowSeconds: w, perClient, perProfile, global, perEmail } = SUBSCRIBE_LIMITS;
+  const L = SUBSCRIBE_LIMITS;
+  const w = L.windowSeconds;
   // Sign-ups need a per-visitor limit, so without a trusted client address (TRUST_PROXY off) none are taken.
   const address = trustedClientAddress(request.headers, deps.trustProxy ?? env().TRUST_PROXY);
   if (!address) return accepted;
   // Checked before anything is stored, so an installation with sign-ups off keeps no per-visitor rows.
   if (!(await subscribeStatus()).live) return accepted;
-  // Refused attempts don't restart these windows, so a trickle of attempts can't keep sign-ups closed.
-  const fixed = { refusedExtend: false };
-  if (!(await consumeAttempt(`subscribe:client:${limitKey(address)}`, w, perClient, fixed))) return json(429);
-
+  // Nor do requests for unknown or unpublished profiles: every row written below is followed by the purge.
   const live = await getLiveProfileById(profileId);
   const published = live ? await getPublishedDocument(live) : null;
   if (!live || !published) return accepted;
-  // Expired limit rows go on every request for a live profile, not only on a successful sign-up, so rows from visitors
-  // whose requests are later dropped don't pile up; requests for unknown profiles don't trigger the table scan. A failed
-  // cleanup doesn't block the request.
-  await purgeAttempts("subscribe:", w).catch((err: unknown) =>
+
+  // Fixed windows: refused attempts don't move them, so a trickle of attempts can't keep sign-ups closed.
+  const fixed = { refusedExtend: false };
+  // While the installation is full, nothing is counted, so retries don't extend a visitor's or an owner's windows.
+  if ((await attemptsUsed("subscribe:global", w)) >= L.global) return json(429);
+  // One site rotating through its /64s still shares one /48 limit. It goes first, so once it refuses, new /64s add no
+  // rows; a refused request only counts on an existing row, which is why skipping the purge below costs nothing.
+  const site = ipv6Site(address);
+  if (site && !(await consumeAttempt(`subscribe:site:${limitKey(site)}`, w, L.perSite, fixed))) return json(429);
+  if (!(await consumeAttempt(`subscribe:client:${limitKey(address)}`, w, L.perClient, fixed))) return json(429);
+  // Expired limit rows go on every request for a live profile that passes the per-visitor limits, not only on a
+  // successful sign-up, so rows from visitors whose requests are later dropped don't pile up. A failed cleanup doesn't
+  // block the request.
+  await Promise.all([purgeAttempts("subscribe:", w), purgeAttempts("subscribe-day:", L.daySeconds)]).catch((err: unknown) =>
     logger.error({ err: err instanceof Error ? err.name : "unknown" }, "Purging sign-up limit rows failed"),
   );
   // The card's form is open only while its share-back switch is on; its consent line names the card.
@@ -145,29 +177,44 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   } else if (!card?.shareBack || !visitorName) return accepted;
   if (!(await ownerVerified(live.ownerId))) return accepted;
 
-  // The per-address limit is silent, so it reveals nothing. It is read first, so repeats of one address don't use up
-  // the shared limits, and counted only after them, so new rows stay within the installation-wide limit.
-  const emailKey = `subscribe:email:${limitKey(`${live.id}\u0000${email}`)}`;
-  if ((await attemptsUsed(emailKey, w)) >= perEmail) return accepted;
-  if (!(await consumeAttempt(`subscribe:profile:${live.id}`, w, perProfile, fixed))) return json(429);
-  if (!(await consumeAttempt("subscribe:global", w, global, fixed))) return json(429);
-  if (!(await consumeAttempt(emailKey, w, perEmail, fixed))) return accepted;
+  // The shared limits answer 429 the same for every address, so they run before the per-recipient limit, which is
+  // silent: checking it first would let a full shared limit reveal which addresses signed up recently. Recipient rows
+  // are written only past the installation-wide limit.
+  // One sender (an IPv4 address or an IPv6 /48) can use only part of an owner's daily quota, so closing an owner's
+  // sign-ups for the day takes many senders.
+  const sender = `subscribe-day:sender:${limitKey(`${site ?? address}\u0000${live.ownerId}`)}`;
+  if (!(await consumeAttempt(sender, L.daySeconds, L.perSenderOwnerDay, fixed))) return json(429);
+  if (!(await consumeAttempt(`subscribe:profile:${live.id}`, w, L.perProfile, fixed))) return json(429);
+  if (!(await consumeAttempt(`subscribe:owner:${live.ownerId}`, w, L.perOwner, fixed))) return json(429);
+  if (!(await consumeAttempt(`subscribe-day:owner:${live.ownerId}`, L.daySeconds, L.perOwnerDay, fixed))) return json(429);
+  if (!(await consumeAttempt("subscribe:global", w, L.global, fixed))) return json(429);
+  const to = limitKey(recipientKey(email));
+  const hour = `subscribe:to:${to}`;
+  const day = `subscribe-day:to:${to}`;
+  if ((await attemptsUsed(hour, w)) >= L.perRecipient || (await attemptsUsed(day, L.daySeconds)) >= L.perRecipientDay) return accepted;
+  const [inHour, inDay] = await Promise.all([
+    consumeAttempt(hour, w, L.perRecipient, fixed),
+    consumeAttempt(day, L.daySeconds, L.perRecipientDay, fixed),
+  ]);
+  if (!inHour || !inDay) return accepted;
 
-  const name = plainName(card ? card.displayName : published.header.displayName);
+  // The email names the page by its address, not the owner-typed display or card name, so an account can't use the
+  // form to deliver its own text to arbitrary inboxes. The stored consent wording keeps the name the visitor saw.
+  const page = pageName(live.handle);
   try {
+    const name = plainName(card ? card.displayName : published.header.displayName);
     const consent = card ? cardConsentText(name) : consentText(name);
     const tokens = await recordSignup({ profileId: live.id, blockId, name: visitorName, ...details, email, consentText: consent });
     if (tokens) {
       const confirmUrl = tokenLink("/subscribe/confirm", tokens.confirmToken);
       const removeUrl = tokenLink("/subscribe/remove", tokens.removeToken);
-      // The name is user-supplied, so it stays out of the subject and is quoted in the body.
       const content = actionEmail({
         heading: "Confirm your subscription",
-        // A card sign-up lists what it shares. Visitor-typed text (name, note) is never echoed, so the form can't relay messages
-        // to arbitrary inboxes; the phone is canonical digits, so it can't carry text.
+        // A card sign-up lists what it shares but echoes none of what the visitor typed (name, phone, note), so the
+        // form can't deliver chosen text or a callback number to an arbitrary inbox. The confirm page shows the details.
         body: card
-          ? `Someone, hopefully you, asked to share contact details with "${name}" after scanning a COVALink business card: this email address, a name${details.phone ? `, the phone number ${details.phone}` : ""}${details.note ? " and a note" : ""}. Confirm to share them with the card's owner. The link works for 48 hours.`
-          : `Someone, hopefully you, asked to join the email list of the COVALink page "${name}". Confirm to share your email address with its owner. The link works for 48 hours.`,
+          ? `Someone, hopefully you, asked to share contact details with the owner of the COVALink page ${page} after scanning their business card: this email address, a name${details.phone ? ", a phone number" : ""}${details.note ? " and a note" : ""}. Open the link to review them, then confirm to share them. The link works for 48 hours.`
+          : `Someone, hopefully you, asked to join the email list of the COVALink page ${page}. Confirm to share your email address with its owner. The link works for 48 hours.`,
         actionLabel: "Confirm subscription",
         url: confirmUrl,
         footer: { text: "Not you, or changed your mind?", label: "Remove my email", url: removeUrl },
@@ -181,12 +228,20 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   return accepted;
 }
 
-/** `POST /api/subscribe/confirm` and `/remove`: the token from the emailed link's fragment. */
+/**
+ * `POST /api/subscribe/confirm` and `/remove`: the token from the emailed link's fragment. `/confirm` with `preview:
+ * true` changes nothing and answers what confirming would share, so the visitor sees the details first.
+ */
 export async function handleSubscribeToken(request: Request, action: "confirm" | "remove"): Promise<Response> {
   const read = await readJson(request);
   if ("refusal" in read) return read.refusal;
   const parsed = tokenSchema.safeParse(read.body);
-  if (!parsed.success) return json(400, { ok: false });
+  if (!parsed.success || (parsed.data.preview && action !== "confirm")) return json(400, { ok: false });
+  if (parsed.data.preview) {
+    const found = await previewSignup(parsed.data.token).catch(() => null);
+    if (!found) return json(410, { ok: false });
+    return json(200, { ok: true, page: pageName(found.handle), name: found.name, phone: found.phone, note: found.note });
+  }
   const ok = await (action === "confirm" ? confirmSignup : removeSignup)(parsed.data.token).catch(() => false);
   return json(ok ? 200 : 410, { ok });
 }

@@ -19,7 +19,7 @@ import { qrFileName, qrSvg, qrTargetUrl } from "@/features/analytics/qr";
 import { parseDay, presetRange, rangeDays, resolveRange } from "@/features/analytics/range";
 import { newSalt, visitorHash } from "@/features/analytics/visitor";
 import { createDefaultDocument } from "@/features/profiles/document";
-import { TRUSTED_IP_HEADERS, trustedClientAddress } from "@/lib/security/client-address";
+import { ipv6Site, TRUSTED_IP_HEADERS, trustedClientAddress } from "@/lib/security/client-address";
 import { parseArgs, resolveRetention, RETENTION_MAX, RETENTION_MIN, UsageError } from "../../scripts/analytics-purge-core.mjs";
 
 const UA = {
@@ -70,6 +70,15 @@ describe("trusted client address (C1)", () => {
     for (const value of corpus) {
       expect(trustedClientAddress(h({ "x-forwarded-for": value }), true), value).toBe(getIPFromHeader(value));
     }
+  });
+
+  it("groups IPv6 clients by their /48 site; IPv4 and mapped addresses have none", () => {
+    const site = (value: string) => ipv6Site(trustedClientAddress(h({ "x-forwarded-for": value }), true)!);
+    expect(site("2001:db8:1:2::9")).toBe("2001:0db8:0001");
+    expect(site("2001:DB8:1:ffff:1::")).toBe("2001:0db8:0001");
+    expect(site("2001:db8:2::1")).toBe("2001:0db8:0002");
+    expect(site("203.0.113.7")).toBeNull();
+    expect(site("::ffff:203.0.113.7")).toBeNull();
   });
 });
 

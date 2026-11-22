@@ -28,13 +28,20 @@ const toValues = (c?: CardContact): ContactValues =>
 
 /**
  * The card's two extras for visitors who scan it. Switches save at once. Save contact needs contact details, so
- * turning it on without them opens the details form, and saving the form turns it on.
+ * turning it on without them opens the details form, and saving that form turns it on. Editing the details otherwise
+ * keeps the switch as it is.
  */
 export function CardExtras({ profileId, saved, shareBackNote }: { profileId: string; saved: CardSettings; shareBackNote?: ReactNode }) {
   const router = useRouter();
   const id = useId();
   const [card, setCard] = useState(saved);
   const [editing, setEditing] = useState(false);
+  // Only a form opened from the switch turns Save contact on; editing the details leaves the switch as it is.
+  const [turnOn, setTurnOn] = useState(false);
+  const edit = (on: boolean) => {
+    setTurnOn(on);
+    setEditing(true);
+  };
   const [values, setValues] = useState(() => toValues(saved.contact));
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +68,8 @@ export function CardExtras({ profileId, saved, shareBackNote }: { profileId: str
   function saveContact(e: React.FormEvent) {
     e.preventDefault();
     const contact = { label: "Save contact", ...values };
-    save({ contact, saveContact: true }, "Contact details saved. Visitors can now save them.", () => setEditing(false));
+    const done = turnOn || card.saveContact ? "Contact details saved. Visitors can now save them." : "Contact details saved. Save contact is still off.";
+    save({ contact, ...(turnOn && { saveContact: true }) }, done, () => setEditing(false));
   }
 
   const row = "grid gap-3 rounded-cl-lg border border-cl-line bg-cl-surface p-4";
@@ -114,14 +122,14 @@ export function CardExtras({ profileId, saved, shareBackNote }: { profileId: str
             disabled={pending}
             aria-describedby={`${id}-contact-hint`}
             onCheckedChange={(on) => {
-              if (on && !card.contact) setEditing(true);
+              if (on && !card.contact) edit(true);
               else save({ saveContact: on }, on ? "Save contact is on." : "Save contact is off.");
             }}
             className="mt-1"
           />
         </div>
         {!editing && (
-          <Button type="button" variant="outline" className="min-h-11 w-fit rounded-full sm:min-h-0" onClick={() => setEditing(true)}>
+          <Button type="button" variant="outline" className="min-h-11 w-fit rounded-full sm:min-h-0" onClick={() => edit(false)}>
             {card.contact ? "Edit contact details" : "Add contact details"}
           </Button>
         )}
@@ -143,7 +151,7 @@ export function CardExtras({ profileId, saved, shareBackNote }: { profileId: str
             </div>
             <div className="flex flex-wrap gap-3">
               <Button type="submit" disabled={pending} className="min-h-11 rounded-full sm:min-h-0">
-                {pending ? "Saving…" : "Save and turn on"}
+                {pending ? "Saving…" : turnOn ? "Save and turn on" : "Save"}
               </Button>
               <Button type="button" variant="ghost" className="min-h-11 rounded-full sm:min-h-0" onClick={() => setEditing(false)}>
                 Cancel

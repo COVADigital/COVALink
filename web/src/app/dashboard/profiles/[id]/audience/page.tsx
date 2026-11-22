@@ -94,28 +94,28 @@ async function Audience({ params }: Pick<PageProps<"/dashboard/profiles/[id]/aud
           )
         )}
 
-        {contacts.length > 0 ? (
-          <section aria-labelledby="contacts-heading" className="grid gap-3">
+        {/* Mounted with or without contacts, so deleting the last one still announces it. */}
+        <section aria-labelledby={contacts.length > 0 ? "contacts-heading" : undefined} className="grid gap-3">
+          {contacts.length > 0 && (
             <h2 id="contacts-heading" className="text-base font-medium">
               Contacts
             </h2>
-            <ContactsTable
-              profileId={profile.id}
-              contacts={contacts.map((c) => ({
-                id: c.id,
-                email: c.email,
-                name: c.name,
-                phone: c.phone,
-                note: c.note,
-                source: c.source,
-                status: c.status,
-                date: DATE.format(c.confirmedAt ?? c.createdAt),
-              }))}
-            />
-          </section>
-        ) : (
-          collecting && <p className="text-sm text-cl-ink-2" data-testid="audience-none">No sign-ups yet.</p>
-        )}
+          )}
+          <ContactsTable
+            empty={collecting && <p className="text-sm text-cl-ink-2" data-testid="audience-none">No sign-ups yet.</p>}
+            profileId={profile.id}
+            contacts={contacts.map((c) => ({
+              id: c.id,
+              email: c.email,
+              name: c.name,
+              phone: c.phone,
+              note: c.note,
+              source: c.source,
+              status: c.status,
+              date: DATE.format(c.confirmedAt ?? c.createdAt),
+            }))}
+          />
+        </section>
 
         {confirmed > 0 && (
           <p className="text-sm text-cl-ink-2">

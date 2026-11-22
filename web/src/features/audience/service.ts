@@ -75,6 +75,26 @@ export async function confirmSignup(token: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/**
+ * What confirming the token would share, for the confirm page: the profile's handle and, for a card sign-up, the
+ * name, phone and note. Null when the token is unknown, used or expired. Only the inbox holder has the token.
+ */
+export async function previewSignup(token: string): Promise<{ handle: string; name: string | null; phone: string | null; note: string | null } | null> {
+  const [row] = await db
+    .select({ handle: profiles.handle, name: audienceContacts.name, phone: audienceContacts.phone, note: audienceContacts.note })
+    .from(audienceContacts)
+    .innerJoin(profiles, eq(profiles.id, audienceContacts.profileId))
+    .where(
+      and(
+        eq(audienceContacts.confirmTokenHash, hashToken(token)),
+        eq(audienceContacts.status, "pending"),
+        gt(audienceContacts.createdAt, pendingCutoff()),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 /** Deletes the contact the remove token belongs to, pending or confirmed. False when it's unknown. */
 export async function removeSignup(token: string): Promise<boolean> {
   const rows = await db
@@ -100,9 +120,15 @@ export interface AudienceContact {
 const onceConfirmed = (column: typeof audienceContacts.name | typeof audienceContacts.phone | typeof audienceContacts.note) =>
   sql<string | null>`case when ${audienceContacts.status} = 'confirmed' then ${column} end`;
 
-/** The profile's contacts, newest first; expired pending rows are left out, and pending rows show only the email. Scoped to the owner. */
+/** `v•••@example.com`: the visitor hasn't agreed to share an unconfirmed address yet. */
+export const maskEmail = (email: string) => `${email[0]}•••${email.slice(email.lastIndexOf("@"))}`;
+
+/**
+ * The profile's contacts, newest first; expired pending rows are left out, and pending rows show only a masked email.
+ * Scoped to the owner.
+ */
 export async function listContacts(ownerId: string, profileId: string): Promise<AudienceContact[]> {
-  return db
+  const rows = await db
     .select({
       id: audienceContacts.id,
       email: audienceContacts.email,
@@ -124,6 +150,7 @@ export async function listContacts(ownerId: string, profileId: string): Promise<
       ),
     )
     .orderBy(desc(audienceContacts.createdAt));
+  return rows.map((r) => (r.status === "pending" ? { ...r, email: maskEmail(r.email) } : r));
 }
 
 /** Confirmed contacts for the CSV export, oldest first. Scoped to the owner. */

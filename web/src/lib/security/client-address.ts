@@ -26,6 +26,9 @@ export function trustedClientAddress(headers: Headers, trustProxy: boolean): str
   return null;
 }
 
+/** The /48 prefix of an IPv6 result of `trustedClientAddress` (a whole site's allocation), or null for IPv4. */
+export const ipv6Site = (address: string) => (address.includes(":") ? address.split(":").slice(0, 3).join(":") : null);
+
 function addressFromHeader(value: string): string | null {
   const parts = value.split(",").map((p) => p.trim()).filter(Boolean);
   if (parts.length !== 1) return null;

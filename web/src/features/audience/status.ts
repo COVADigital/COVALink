@@ -19,8 +19,11 @@ export async function subscribeStatus(): Promise<{ emailReady: boolean; visitors
 }
 
 /**
- * Only owners with a verified email address can collect sign-ups, so a
- * throwaway account can't make this server email arbitrary addresses.
+ * Only owners with a verified email address can collect sign-ups. A verified
+ * mailbox is cheap, so this isn't the abuse limit: the per-owner and
+ * per-recipient limits (subscribe.ts) bound the confirmation emails, and the
+ * emails carry no free text the owner or the visitor typed: the page is named
+ * by its handle (`[a-z0-9_-]`, at most 30 characters).
  */
 export async function ownerVerified(ownerId: string): Promise<boolean> {
   const [row] = await db.select({ verified: users.emailVerified }).from(users).where(eq(users.id, ownerId)).limit(1);

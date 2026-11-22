@@ -179,13 +179,16 @@ test("a visitor signs up and confirms from the email; the owner sees, exports an
   await page.goto(`${profileUrl}/audience`);
   await expect(page.getByText("0 confirmed contacts")).toBeVisible();
   await expect(page.getByRole("link", { name: "Export CSV" })).toHaveCount(0);
+  // The visitor hasn't agreed to share the address yet, so the pending row masks it.
+  await expect(page.getByRole("row").filter({ hasText: "f•••@example.com" })).toBeVisible();
+  await expect(page.getByText(FAN)).toHaveCount(0);
 
   const { context, page: linkPage } = await useLink(browser, "confirm", tokens.confirm);
-  // The same link again (a fresh load, as from the email): already used.
+  // The same link again (a fresh load, as from the email): the preview already knows it's used, so there's no button.
   await linkPage.goto("about:blank");
   await linkPage.goto(`${MAIL}/subscribe/confirm#token=${encodeURIComponent(tokens.confirm)}`);
-  await linkPage.getByRole("button", { name: "Confirm subscription" }).click();
   await expect(linkPage.getByTestId("subscribe-gone")).toBeFocused();
+  await expect(linkPage.getByRole("button", { name: "Confirm subscription" })).toHaveCount(0);
   // Without a token there's nothing to confirm.
   await linkPage.goto(`${MAIL}/subscribe/confirm`);
   await expect(linkPage.getByTestId("subscribe-gone")).toBeVisible();

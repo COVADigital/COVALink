@@ -12,9 +12,10 @@ import { db } from "@/db";
  *
  * By default every attempt, refused ones included, restarts the window, which
  * keeps a guesser locked out while they keep trying. With `refusedExtend:
- * false` a refused attempt leaves the window alone, so a limit shared by many
- * people (Subscribe's per-profile and installation-wide limits) can't be held
- * shut by a trickle of attempts.
+ * false` the window is fixed: it starts at the first attempt and no attempt
+ * moves it, so a limit shared by many people (Subscribe's per-profile and
+ * installation-wide limits) can't be held shut by a trickle of attempts, and
+ * steady traffic below the limit doesn't pile up into it.
  */
 export async function consumeAttempt(
   key: string,
@@ -24,13 +25,14 @@ export async function consumeAttempt(
 ): Promise<boolean> {
   const now = Date.now();
   const cutoff = now - windowSeconds * 1000;
-  const refused = refusedExtend ? sql`false` : sql`rate_limits.last_request >= ${cutoff} and rate_limits.count >= ${max}`;
+  // In a fixed window `last_request` is the window's start.
+  const keep = refusedExtend ? sql`false` : sql`rate_limits.last_request >= ${cutoff}`;
   const rows = await db.execute<{ count: number }>(sql`
     insert into rate_limits (id, key, count, last_request)
     values (${crypto.randomUUID()}, ${`covalink:${key}`}, 1, ${now})
     on conflict (key) do update set
       count = case when rate_limits.last_request < ${cutoff} then 1 else rate_limits.count + 1 end,
-      last_request = case when ${refused} then rate_limits.last_request else ${now} end
+      last_request = case when ${keep} then rate_limits.last_request else ${now} end
     returning count`);
   return Number(rows[0]?.count) <= max;
 }

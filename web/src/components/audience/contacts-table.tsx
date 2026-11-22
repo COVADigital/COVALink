@@ -2,7 +2,7 @@
 
 import { Trash } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition, type ReactNode } from "react";
 import { TOUCH } from "@/components/admin/styles";
 import { FormAlert } from "@/components/auth/form-field";
 import {
@@ -29,8 +29,8 @@ export interface ContactRow {
   date: string;
 }
 
-/** The profile's contacts with a confirmed delete per row. */
-export function ContactsTable({ profileId, contacts }: { profileId: string; contacts: ContactRow[] }) {
+/** The profile's contacts with a confirmed delete per row; `empty` shows instead of the table when there are none. */
+export function ContactsTable({ profileId, contacts, empty }: { profileId: string; contacts: ContactRow[]; empty?: ReactNode }) {
   const router = useRouter();
   const [target, setTarget] = useState<ContactRow | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +57,9 @@ export function ContactsTable({ profileId, contacts }: { profileId: string; cont
 
   return (
     <>
+      {contacts.length === 0 ? (
+        empty
+      ) : (
       <div className="overflow-x-auto rounded-cl-lg border border-cl-line bg-cl-surface">
         <table className="w-full text-sm" data-testid="audience-contacts">
           <caption className="sr-only">Contacts</caption>
@@ -109,6 +112,7 @@ export function ContactsTable({ profileId, contacts }: { profileId: string; cont
           </tbody>
         </table>
       </div>
+      )}
       <AlertDialog open={target !== null} onOpenChange={(open) => !open && !pending && setTarget(null)}>
         <AlertDialogContent
           onCloseAutoFocus={(e) => {

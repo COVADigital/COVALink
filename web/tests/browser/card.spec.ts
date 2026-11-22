@@ -149,6 +149,21 @@ test("with email, the verified owner turns on sharing back and Save contact (whi
   await page.reload();
   await expect(page.getByRole("switch", { name: "Let visitors share their details back" })).toBeChecked();
   await expect(page.getByRole("switch", { name: "Let visitors save your contact" })).toBeChecked();
+
+  // Editing the details while Save contact is off keeps it off.
+  const saveSwitch = page.getByRole("switch", { name: "Let visitors save your contact" });
+  await saveSwitch.click();
+  await expect(saveSwitch).not.toBeChecked();
+  await page.getByRole("button", { name: "Edit contact details" }).click();
+  const edit = page.getByRole("form", { name: "Contact details" });
+  await expect(edit.getByRole("button", { name: "Save and turn on" })).toHaveCount(0);
+  await edit.getByLabel("Job title").fill("Engineer");
+  await edit.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Edit contact details" })).toBeVisible();
+  await page.reload();
+  await expect(saveSwitch).not.toBeChecked();
+  await saveSwitch.click();
+  await expect(saveSwitch).toBeChecked();
 });
 
 test("a visitor who scans the card saves the contact and shares their details; the owner sees them in Audience", async ({ page, browser }) => {
@@ -187,7 +202,17 @@ test("a visitor who scans the card saves the contact and shares their details; t
   const { text, token } = await linkFor(VISITOR, "/subscribe/confirm");
   expect(text).toContain("business card");
   const confirm = await visitor(browser);
+  // If the details can't be loaded, confirming isn't offered; trying again loads them.
+  await confirm.page.route("**/api/subscribe/confirm", (route) => route.abort(), { times: 1 });
   await confirm.page.goto(`${MAIL}/subscribe/confirm#token=${encodeURIComponent(token)}`);
+  await expect(confirm.page.getByRole("button", { name: "Confirm subscription" })).toHaveCount(0);
+  await confirm.page.getByRole("button", { name: "Try again" }).click();
+  // What confirming shares is shown first.
+  const preview = confirm.page.getByTestId("subscribe-preview");
+  await expect(preview).toContainText(`/${HANDLE}`);
+  await expect(preview).toContainText("Vera Visitor");
+  await expect(preview).toContainText("+15550100200");
+  await expect(preview).toContainText("Met at the fair");
   await confirm.page.getByRole("button", { name: "Confirm subscription" }).click();
   await expect(confirm.page.getByTestId("subscribe-done")).toBeFocused();
   await confirm.context.close();
