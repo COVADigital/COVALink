@@ -4,7 +4,7 @@ import { and, desc, eq, gt, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { audienceContacts, profiles } from "@/db/schema";
 
-/** Unconfirmed sign-ups are deleted after this long. */
+/** An emailed confirm link works this long; a pending row is deleted this long after its latest sign-up. */
 export const PENDING_TTL_HOURS = 48;
 
 export const hashToken = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
@@ -29,11 +29,10 @@ export async function recordSignup(input: {
   email: string;
   consentText: string;
   /**
-   * False when no email will go out (the recipient is over quota): an existing pending sign-up keeps its tokens and
-   * details, so links already emailed keep working, but what its owner sees (source, time) changes exactly as for a
-   * sign-up that is emailed, so the owner can't tell the two apart. A new address is stored as pending either way.
-   * Accepted side effects: the refreshed time also restarts the 48 hours, and the source can change while the stored
-   * consent wording stays the one the visitor saw.
+   * False when no email will go out (the recipient is over quota): an existing pending sign-up keeps everything tied to
+   * its emailed link (tokens, source, block, details, consent wording, and the time its 48 hours run from), so that link
+   * confirms exactly what its email offered, but what the owner sees (latest sign-up time and source) changes exactly
+   * as for a sign-up that is emailed, so the owner can't tell the two apart. A new address is stored as pending either way.
    */
   rotate?: boolean;
 }): Promise<{ confirmToken: string; removeToken: string } | null> {
@@ -42,9 +41,13 @@ export async function recordSignup(input: {
   return db.transaction(async (tx) => {
     // shortcut: swept on each sign-up (at most the global limit per hour), not on a timer; an install with no sign-ups
     // keeps its last expired rows until the next one. Move to a scheduled job if one is added.
-    await tx.delete(audienceContacts).where(and(eq(audienceContacts.status, "pending"), lt(audienceContacts.createdAt, pendingCutoff())));
+    await tx.delete(audienceContacts).where(and(eq(audienceContacts.status, "pending"), lt(audienceContacts.lastSignupAt, pendingCutoff())));
+    const source = input.blockId ? ("block" as const) : ("card" as const);
+    const now = new Date();
+    const seen = { lastSignupAt: now, lastSource: source };
     const values = {
-      source: input.blockId ? ("block" as const) : ("card" as const),
+      ...seen,
+      source,
       blockId: input.blockId,
       name: input.name ?? null,
       phone: input.phone ?? null,
@@ -52,14 +55,14 @@ export async function recordSignup(input: {
       consentText: input.consentText,
       confirmTokenHash: hashToken(confirmToken),
       removeTokenHash: hashToken(removeToken),
-      createdAt: new Date(),
+      createdAt: now,
     };
     const rows = await tx
       .insert(audienceContacts)
       .values({ profileId: input.profileId, email: input.email, status: "pending", ...values })
       .onConflictDoUpdate({
         target: [audienceContacts.profileId, audienceContacts.email],
-        set: input.rotate === false ? { source: values.source, blockId: values.blockId, createdAt: values.createdAt } : values,
+        set: input.rotate === false ? seen : values,
         setWhere: sql`${audienceContacts.status} = 'pending'`,
       })
       .returning({ id: audienceContacts.id });
@@ -120,6 +123,7 @@ export interface AudienceContact {
   note: string | null;
   source: "block" | "card";
   status: "pending" | "confirmed";
+  /** The latest sign-up for this address. */
   createdAt: Date;
   confirmedAt: Date | null;
 }
@@ -132,8 +136,8 @@ const onceConfirmed = (column: typeof audienceContacts.name | typeof audienceCon
 export const maskEmail = (email: string) => `${email[0]}•••${email.slice(email.lastIndexOf("@"))}`;
 
 /**
- * The profile's contacts, newest first; expired pending rows are left out, and pending rows show only a masked email.
- * Scoped to the owner.
+ * The profile's contacts, newest first; expired pending rows are left out, and pending rows show only a masked email
+ * and their latest sign-up's time and source. Scoped to the owner.
  */
 export async function listContacts(ownerId: string, profileId: string): Promise<AudienceContact[]> {
   const rows = await db
@@ -143,9 +147,9 @@ export async function listContacts(ownerId: string, profileId: string): Promise<
       name: onceConfirmed(audienceContacts.name),
       phone: onceConfirmed(audienceContacts.phone),
       note: onceConfirmed(audienceContacts.note),
-      source: audienceContacts.source,
+      source: sql<"block" | "card">`case when ${audienceContacts.status} = 'confirmed' then ${audienceContacts.source} else ${audienceContacts.lastSource} end`,
       status: audienceContacts.status,
-      createdAt: audienceContacts.createdAt,
+      createdAt: audienceContacts.lastSignupAt,
       confirmedAt: audienceContacts.confirmedAt,
     })
     .from(audienceContacts)
@@ -154,10 +158,10 @@ export async function listContacts(ownerId: string, profileId: string): Promise<
       and(
         eq(audienceContacts.profileId, profileId),
         eq(profiles.ownerId, ownerId),
-        or(eq(audienceContacts.status, "confirmed"), gt(audienceContacts.createdAt, pendingCutoff())),
+        or(eq(audienceContacts.status, "confirmed"), gt(audienceContacts.lastSignupAt, pendingCutoff())),
       ),
     )
-    .orderBy(desc(audienceContacts.createdAt));
+    .orderBy(desc(audienceContacts.lastSignupAt));
   return rows.map((r) => (r.status === "pending" ? { ...r, email: maskEmail(r.email) } : r));
 }
 

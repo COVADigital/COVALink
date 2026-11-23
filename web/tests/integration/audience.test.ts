@@ -150,12 +150,19 @@ describe("subscribe", () => {
       ["b•••@example.com", "pending", "block"],
       ["i•••@example.com", "pending", "block"],
     ]);
-    // An existing pending sign-up repeated over quota: its time moves as usual, but its emailed link still confirms.
-    const [{ created_at: before }] = (await testSql()`select created_at from audience_contacts where profile_id = ${bobProfileId} and email = 'busy@example.com'`) as unknown as { created_at: Date }[];
+    // An existing pending sign-up repeated over quota: the time its owner sees moves as usual, but its emailed link's own
+    // time (which its 48 hours run from) stays, and the link still confirms.
+    const times = async () =>
+      ((await testSql()`select created_at, last_signup_at from audience_contacts where profile_id = ${bobProfileId} and email = 'busy@example.com'`) as unknown as {
+        created_at: Date;
+        last_signup_at: Date;
+      }[])[0];
+    const before = await times();
     sent = [];
     await subscribe({ email: "busy@example.com", p: bobProfileId }, { ip: "203.0.113.61" });
-    const [{ created_at: after }] = (await testSql()`select created_at from audience_contacts where profile_id = ${bobProfileId} and email = 'busy@example.com'`) as unknown as { created_at: Date }[];
-    expect(after.getTime()).toBeGreaterThan(before.getTime());
+    const after = await times();
+    expect(after.last_signup_at.getTime()).toBeGreaterThan(before.last_signup_at.getTime());
+    expect(after.created_at).toEqual(before.created_at);
     expect(sent).toEqual([]);
     expect((await confirm(lastLink)).status).toBe(200);
   });
@@ -168,9 +175,16 @@ describe("subscribe", () => {
     expect((await confirm(tokenFrom(sent[1], "confirm"))).status).toBe(200);
   });
 
-  it("expired pending sign-ups can't be confirmed, aren't listed, and are deleted on the next sign-up to any profile", async () => {
+  it("a link stops working 48 hours after its email, even while later sign-ups keep the address listed as pending", async () => {
     await subscribe({ email: "old@example.com" });
     await testSql()`update audience_contacts set created_at = now() - make_interval(hours => ${PENDING_TTL_HOURS + 1})`;
+    expect((await listContacts(alice, profileId)).map((c) => c.status)).toEqual(["pending"]);
+    expect((await confirm(tokenFrom(sent[0], "confirm"))).status).toBe(410);
+  });
+
+  it("expired pending sign-ups can't be confirmed, aren't listed, and are deleted on the next sign-up to any profile", async () => {
+    await subscribe({ email: "old@example.com" });
+    await testSql()`update audience_contacts set created_at = now() - make_interval(hours => ${PENDING_TTL_HOURS + 1}), last_signup_at = now() - make_interval(hours => ${PENDING_TTL_HOURS + 1})`;
     expect(await listContacts(alice, profileId)).toEqual([]);
     expect((await confirm(tokenFrom(sent[0], "confirm"))).status).toBe(410);
     // Bob's profile collects too; a sign-up there sweeps Alice's expired row.
@@ -510,6 +524,22 @@ describe("business card sign-ups", () => {
     expect((await handleSubscribeToken(post("/api/subscribe/confirm", { token: unknown, preview: true }), "confirm")).status).toBe(410);
     expect((await handleSubscribeToken(post("/api/subscribe/remove", { token: unknown, preview: true }), "remove")).status).toBe(400);
     expect((await handleSubscribeToken(post("/api/subscribe/confirm", { token: unknown, preview: false }), "confirm")).status).toBe(400);
+  });
+
+  it("an over-quota block sign-up after a card sign-up shows as a block sign-up, but the card link confirms the card's details as a card contact", async () => {
+    await setCard(CARD);
+    for (let i = 0; i < SUBSCRIBE_LIMITS.perRecipient; i++) await cardSignup({ email: "v@example.com", note: "From the card" });
+    const cardLink = tokenFrom(sent.at(-1)!, "confirm");
+    sent = [];
+    expect((await subscribe({ email: "v@example.com" })).status).toBe(202);
+    expect(sent).toEqual([]);
+    expect((await listContacts(alice, profileId)).map((c) => [c.status, c.source])).toEqual([["pending", "block"]]);
+    expect((await confirm(cardLink)).status).toBe(200);
+    expect(await exportContacts(alice, profileId)).toEqual([
+      expect.objectContaining({ email: "v@example.com", name: "Vera Visitor", note: "From the card", source: "card", consentText: "By sending, you agree to share these details with Alice's Card. You can remove them at any time." }),
+    ]);
+    expect((await cardRows())[0]).toMatchObject({ source: "card", block_id: null });
+    expect((await listContacts(alice, profileId)).map((c) => [c.status, c.source])).toEqual([["confirmed", "card"]]);
   });
 
   it("share the per-recipient limit with Subscribe blocks", async () => {

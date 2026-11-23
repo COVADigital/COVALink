@@ -229,8 +229,9 @@ export const auditLogs = pgTable(
 /**
  * Visitors who signed up through a profile's Subscribe block or its business card. A row starts
  * `pending` and becomes `confirmed` through the emailed link (double opt-in);
- * pending rows older than 48 hours are deleted on the next sign-up to any
- * profile. Only SHA-256 hashes of the confirm and remove tokens are stored.
+ * the link works for 48 hours from `created_at`, and pending rows whose latest
+ * sign-up (`last_signup_at`) is older than that are deleted on the next sign-up
+ * to any profile. Only SHA-256 hashes of the confirm and remove tokens are stored.
  * `consent_text` keeps the wording the visitor agreed to.
  */
 export const audienceContacts = pgTable(
@@ -254,15 +255,21 @@ export const audienceContacts = pgTable(
     note: text("note"),
     confirmTokenHash: text("confirm_token_hash").unique(),
     removeTokenHash: text("remove_token_hash").notNull().unique(),
+    // When the emailed link was issued; with source, block_id, the details and consent_text it belongs to that link.
     createdAt,
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    // The latest sign-up for this address, which the owner's list shows for a pending row. Kept apart from the link's
+    // own fields so a repeat that sends no email (recipient over quota) looks the same to the owner without changing them.
+    lastSignupAt: timestamp("last_signup_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSource: text("last_source", { enum: ["block", "card"] }).notNull().default("block"),
   },
   (t) => [
     unique("audience_contacts_profile_email_key").on(t.profileId, t.email),
     index("audience_contacts_profile_status_idx").on(t.profileId, t.status, t.createdAt),
     // For the sweep of expired pending sign-ups across all profiles.
-    index("audience_contacts_pending_created_idx").on(t.createdAt).where(sql`${t.status} = 'pending'`),
+    index("audience_contacts_pending_last_signup_idx").on(t.lastSignupAt).where(sql`${t.status} = 'pending'`),
     check("audience_contacts_status_valid", sql`${t.status} in ('pending', 'confirmed')`),
+    check("audience_contacts_last_source_valid", sql`${t.lastSource} in ('block', 'card')`),
     check(
       "audience_contacts_source_valid",
       sql`(${t.source} = 'block' and ${t.blockId} is not null) or (${t.source} = 'card' and ${t.blockId} is null)`,
