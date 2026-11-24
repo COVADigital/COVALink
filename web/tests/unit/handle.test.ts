@@ -31,6 +31,11 @@ describe("handleSchema", () => {
     expect(parse("_abc").success).toBe(false);
   });
 
+  it("keeps handles that earlier versions allowed, so existing profiles still resolve", () => {
+    // The subscriber link pages live under the long-reserved /auth, not a new top-level name.
+    expect(parse("subscribe").success).toBe(true);
+  });
+
   it("rejects every reserved application route", () => {
     for (const reserved of ["login", "register", "dashboard", "admin", "api", "setup"]) {
       expect(isReservedHandle(reserved)).toBe(true);

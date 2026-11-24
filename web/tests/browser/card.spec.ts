@@ -199,12 +199,12 @@ test("a visitor who scans the card saves the contact and shares their details; t
   await expect(form.getByRole("status")).toContainText("check your inbox");
   await context.close();
 
-  const { text, token } = await linkFor(VISITOR, "/subscribe/confirm");
+  const { text, token } = await linkFor(VISITOR, "/auth/subscribe/confirm");
   expect(text).toContain("business card");
   const confirm = await visitor(browser);
   // If the details can't be loaded, confirming isn't offered; trying again loads them.
   await confirm.page.route("**/api/subscribe/confirm", (route) => route.abort(), { times: 1 });
-  await confirm.page.goto(`${MAIL}/subscribe/confirm#token=${encodeURIComponent(token)}`);
+  await confirm.page.goto(`${MAIL}/auth/subscribe/confirm#token=${encodeURIComponent(token)}`);
   await expect(confirm.page.getByRole("button", { name: "Confirm subscription" })).toHaveCount(0);
   await confirm.page.getByRole("button", { name: "Try again" }).click();
   // What confirming shares is shown first.

@@ -48,6 +48,17 @@ export async function attemptsUsed(key: string, windowSeconds: number, exec: Exe
   return Number(rows[0]?.count ?? 0);
 }
 
+/**
+ * Gives back one attempt counted (at `countedAt`) against `key` in a fixed window, for an action that was counted but
+ * didn't happen. Only while that window is current: a window started after `countedAt` keeps its count.
+ */
+export async function refundAttempt(key: string, windowSeconds: number, countedAt: number): Promise<void> {
+  const cutoff = Date.now() - windowSeconds * 1000;
+  await db.execute(sql`
+    update rate_limits set count = count - 1
+    where key = ${`covalink:${key}`} and count > 0 and last_request >= ${cutoff} and last_request <= ${countedAt}`);
+}
+
 /** Deletes this module's rows under `prefix` whose window has passed. */
 export async function purgeAttempts(prefix: string, windowSeconds: number): Promise<void> {
   const cutoff = Date.now() - windowSeconds * 1000;

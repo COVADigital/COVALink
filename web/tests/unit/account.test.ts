@@ -168,7 +168,7 @@ describe("token-page headers", () => {
   it("routes the token pages to the token rule only and every other page to the page rule only", () => {
     const page = pathToRegexp(PAGE_HEADERS_SOURCE);
     const token = pathToRegexp(TOKEN_PAGE_HEADERS_SOURCE);
-    for (const p of ["/reset-password", "/verify-email", "/subscribe/confirm", "/subscribe/remove"]) {
+    for (const p of ["/reset-password", "/verify-email", "/auth/subscribe/confirm", "/auth/subscribe/remove"]) {
       expect(page.test(p), p).toBe(false);
       expect(token.test(p), p).toBe(true);
     }

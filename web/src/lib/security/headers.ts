@@ -154,10 +154,10 @@ export const PROFILE_HEADERS_SOURCE = `/:handle(${PROFILE_PATH})`;
  * (`/api/vcard`, one segment or three get the page headers) and the
  * public profile pages.
  */
-export const PAGE_HEADERS_SOURCE = `/:path((?!media/|dashboard/profiles/[^/]+/qr$|dashboard/profiles/[^/]+/card/download$|dashboard/profiles/[^/]+/audience/export$|reset-password$|verify-email$|subscribe/(?:confirm|remove)$|api/vcard/[^/]+/[^/]+$|${PROFILE_PATH}$).*)`;
+export const PAGE_HEADERS_SOURCE = `/:path((?!media/|dashboard/profiles/[^/]+/qr$|dashboard/profiles/[^/]+/card/download$|dashboard/profiles/[^/]+/audience/export$|reset-password$|verify-email$|auth/subscribe/(?:confirm|remove)$|api/vcard/[^/]+/[^/]+$|${PROFILE_PATH}$).*)`;
 
 /** next.config.ts path pattern for the pages that receive a token in their link fragment. */
-export const TOKEN_PAGE_HEADERS_SOURCE = "/:page(reset-password|verify-email|subscribe/confirm|subscribe/remove)";
+export const TOKEN_PAGE_HEADERS_SOURCE = "/:page(reset-password|verify-email|auth/subscribe/confirm|auth/subscribe/remove)";
 
 export function securityHeaders({ isDev }: { isDev: boolean }): { key: string; value: string }[] {
   return [
@@ -187,8 +187,8 @@ export function profileSecurityHeaders({ isDev }: { isDev: boolean }): { key: st
 
 /**
  * Headers for the pages that receive a reset or verification token in their
- * link fragment (`/reset-password`, `/verify-email`, `/subscribe/confirm`,
- * `/subscribe/remove`). They replace
+ * link fragment (`/reset-password`, `/verify-email`, `/auth/subscribe/confirm`,
+ * `/auth/subscribe/remove`). They replace
  * the page headers there (excluded from `PAGE_HEADERS_SOURCE`), so each
  * field appears exactly once: the page headers with `Referrer-Policy:
  * no-referrer`, plus `no-store` and `noindex`. Next.js also marks these

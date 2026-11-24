@@ -15,8 +15,10 @@ const pendingCutoff = () => new Date(Date.now() - PENDING_TTL_HOURS * 3600_000);
  * Records a sign-up as pending with fresh confirm and remove tokens, and
  * returns them so the caller can email the links. An address that is already
  * confirmed is left alone and gets no email (`null`). A repeated pending
- * sign-up replaces its tokens and restarts the 48 hours. Expired pending rows,
- * of every profile, are deleted first.
+ * sign-up keeps its earlier link until the replacement email is accepted: it
+ * returns `replace`, which the caller runs only then, to switch the row to the
+ * new tokens and details and restart the 48 hours. Expired pending rows, of
+ * every profile, are deleted first.
  */
 export async function recordSignup(input: {
   profileId: string;
@@ -29,13 +31,14 @@ export async function recordSignup(input: {
   email: string;
   consentText: string;
   /**
-   * False when no email will go out (the recipient is over quota): an existing pending sign-up keeps everything tied to
-   * its emailed link (tokens, source, block, details, consent wording, and the time its 48 hours run from), so that link
-   * confirms exactly what its email offered, but what the owner sees (latest sign-up time and source) changes exactly
-   * as for a sign-up that is emailed, so the owner can't tell the two apart. A new address is stored as pending either way.
+   * Whether an email will go out (false: the recipient is over quota). Either way an existing pending sign-up keeps
+   * everything tied to its emailed link (tokens, source, block, details, consent wording, and the time its 48 hours run
+   * from) for now, so that link confirms exactly what its email offered, while what the owner sees (latest sign-up time
+   * and source) changes the same way, so the owner can't tell the two apart. Only with an email is `replace` returned. A
+   * new address is stored as pending either way.
    */
   rotate?: boolean;
-}): Promise<{ confirmToken: string; removeToken: string } | null> {
+}): Promise<{ confirmToken: string; removeToken: string; replace?: () => Promise<void> } | null> {
   const confirmToken = newToken();
   const removeToken = newToken();
   return db.transaction(async (tx) => {
@@ -45,8 +48,8 @@ export async function recordSignup(input: {
     const source = input.blockId ? ("block" as const) : ("card" as const);
     const now = new Date();
     const seen = { lastSignupAt: now, lastSource: source };
-    const values = {
-      ...seen,
+    // What the emailed link confirms; `seen` is only what the owner's list shows.
+    const bound = {
       source,
       blockId: input.blockId,
       name: input.name ?? null,
@@ -57,16 +60,28 @@ export async function recordSignup(input: {
       removeTokenHash: hashToken(removeToken),
       createdAt: now,
     };
-    const rows = await tx
+    const values = { ...seen, ...bound };
+    const [row] = await tx
       .insert(audienceContacts)
       .values({ profileId: input.profileId, email: input.email, status: "pending", ...values })
       .onConflictDoUpdate({
         target: [audienceContacts.profileId, audienceContacts.email],
-        set: input.rotate === false ? seen : values,
+        set: seen,
         setWhere: sql`${audienceContacts.status} = 'pending'`,
       })
-      .returning({ id: audienceContacts.id });
-    return rows.length ? { confirmToken, removeToken } : null;
+      .returning({ id: audienceContacts.id, confirmTokenHash: audienceContacts.confirmTokenHash });
+    if (!row) return null;
+    // A new row already holds these tokens; an existing pending one switches to them only once their email is accepted.
+    if (row.confirmTokenHash === values.confirmTokenHash || input.rotate === false) return { confirmToken, removeToken };
+    const replace = async () => {
+      await db
+        .update(audienceContacts)
+        .set(bound)
+        // Only over an older link: a later repeat whose email was accepted first keeps its own. Two repeats in the same
+        // millisecond: the first accepted wins and the other email's link never works (its earlier link still does).
+        .where(and(eq(audienceContacts.id, row.id), eq(audienceContacts.status, "pending"), lt(audienceContacts.createdAt, now)));
+    };
+    return { confirmToken, removeToken, replace };
   });
 }
 

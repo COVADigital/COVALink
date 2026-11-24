@@ -15,6 +15,7 @@ vi.mock("@/features/audience/status", async (importOriginal) => ({
 }));
 
 import { deleteContact, exportContacts, listContacts, PENDING_TTL_HOURS } from "@/features/audience/service";
+import { attemptsUsed, consumeAttempt, refundAttempt } from "@/features/account/throttle";
 import { handleSubscribe, handleSubscribeToken, SUBSCRIBE_LIMITS } from "@/features/audience/subscribe";
 import * as svc from "@/features/profiles/service";
 import { bootstrapSuperAdmin } from "@/features/setup/service";
@@ -49,14 +50,26 @@ function post(path: string, body: unknown, init: { origin?: string | null; type?
   if (init.ip) h.set("x-forwarded-for", init.ip);
   return new Request(`${TEST_APP_URL}${path}`, { method: "POST", headers: h, body: init.raw ?? JSON.stringify(body) });
 }
+/** Delivery runs after the response; `signedUp` waits for it, so a test sees what an accepted (or refused) email left. */
+let smtpRefuses = false;
+const deliveries: Promise<void>[] = [];
+const mail = {
+  send: async (m: MailMessage) => {
+    if (smtpRefuses) throw Object.assign(new Error("Message rejected"), { responseCode: 550 });
+    sent.push(m);
+  },
+  defer: (task: () => Promise<void>) => void deliveries.push(task()),
+};
+const signedUp = async (res: Promise<Response>) => {
+  const r = await res;
+  await Promise.all(deliveries.splice(0));
+  return r;
+};
 // A trusted client address by default: without one, no sign-ups are taken.
 const subscribe = (body: Record<string, unknown>, init: Parameters<typeof post>[2] = {}, trustProxy = true) =>
-  handleSubscribe(post("/api/subscribe", { p: profileId, b: ID(1), hp: "", ...body }, { ip: "198.51.100.1", ...init }), {
-    send: (m) => sent.push(m),
-    trustProxy,
-  });
+  signedUp(handleSubscribe(post("/api/subscribe", { p: profileId, b: ID(1), hp: "", ...body }, { ip: "198.51.100.1", ...init }), { ...mail, trustProxy }));
 const tokenFrom = (msg: MailMessage, page: "confirm" | "remove") => {
-  const match = msg.text.match(new RegExp(`/subscribe/${page}#token=([A-Za-z0-9_-]{43})`));
+  const match = msg.text.match(new RegExp(`/auth/subscribe/${page}#token=([A-Za-z0-9_-]{43})`));
   if (!match) throw new Error(`no ${page} link`);
   return match[1];
 };
@@ -73,6 +86,7 @@ beforeEach(async () => {
   await resetDatabase();
   Object.assign(status, { emailReady: true, subscribeEnabled: true });
   sent = [];
+  smtpRefuses = false;
   await bootstrapSuperAdmin({ token: TEST_SETUP_TOKEN, name: "Owner", email: "owner@example.com", password: "correct-horse-battery" });
   for (const email of ["alice@example.com", "bob@example.com"]) expect((await signUp(email)).status).toBe(200);
   [alice, bob] = await Promise.all(["alice@example.com", "bob@example.com"].map(idOf));
@@ -173,6 +187,75 @@ describe("subscribe", () => {
     expect(sent).toHaveLength(2);
     expect((await confirm(tokenFrom(sent[0], "confirm"))).status).toBe(410);
     expect((await confirm(tokenFrom(sent[1], "confirm"))).status).toBe(200);
+  });
+
+  it("a repeat whose email isn't accepted keeps the earlier link and what it confirms, and gives the quota back", async () => {
+    await subscribe({ email: "v@example.com" });
+    const first = sent[0];
+    await testSql()`update profiles set card = ${testSql().json({ displayName: "Card", color: "#c6f135", shareBack: true, saveContact: false } as never)} where id = ${profileId}`;
+    smtpRefuses = true;
+    const cardRepeat = handleSubscribe(post("/api/subscribe", { p: profileId, c: "card", name: "Mallory", hp: "", email: "v@example.com" }, { ip: "198.51.100.1" }), {
+      ...mail,
+      trustProxy: true,
+    });
+    expect((await signedUp(cardRepeat)).status).toBe(202);
+    const used = async () => ((await testSql()`select count from rate_limits where key like 'covalink:subscribe:to:%'`)[0] as { count: number }).count;
+    expect(await used()).toBe(1); // The refused email was given back.
+    // The owner still sees the repeat, as for any sign-up.
+    expect(await listContacts(alice, profileId)).toEqual([expect.objectContaining({ status: "pending", source: "card" })]);
+    // The first email's links still work and still offer only the block sign-up, not the card's details.
+    const preview = await handleSubscribeToken(post("/api/subscribe/confirm", { token: tokenFrom(first, "confirm"), preview: true }), "confirm");
+    expect(await preview.json()).toEqual(expect.objectContaining({ ok: true, name: null, phone: null, note: null }));
+    expect((await remove(tokenFrom(first, "remove"))).status).toBe(200);
+  });
+
+  it("an earlier repeat's slower email can't replace a later repeat's link", async () => {
+    await subscribe({ email: "v@example.com" });
+    const accept: (() => void)[] = [];
+    const tasks: Promise<void>[] = [];
+    const slow = {
+      send: (m: MailMessage) => {
+        sent.push(m);
+        return new Promise<void>((resolve) => accept.push(resolve));
+      },
+      defer: (task: () => Promise<void>) => void tasks.push(task()),
+      trustProxy: true,
+    };
+    const repeat = () => handleSubscribe(post("/api/subscribe", { p: profileId, b: ID(1), hp: "", email: "v@example.com" }, { ip: "198.51.100.1" }), slow);
+    await repeat();
+    await new Promise((r) => setTimeout(r, 5)); // Distinct sign-up times.
+    await repeat();
+    accept[1]();
+    await tasks[1];
+    accept[0]();
+    await tasks[0];
+    expect((await confirm(tokenFrom(sent[1], "confirm"))).status).toBe(410);
+    expect((await confirm(tokenFrom(sent[2], "confirm"))).status).toBe(200);
+  });
+
+  it("a refund gives back an attempt only in the window it was counted in", async () => {
+    const key = "subscribe:to:refund-test";
+    await consumeAttempt(key, 3600, 3, { refusedExtend: false });
+    await refundAttempt(key, 3600, Date.now() - 2 * 3600_000); // Counted in an earlier window: the current one keeps it.
+    expect(await attemptsUsed(key, 3600)).toBe(1);
+    await refundAttempt(key, 3600, Date.now());
+    expect(await attemptsUsed(key, 3600)).toBe(0);
+  });
+
+  it("a first sign-up whose email isn't accepted gives the recipient's whole quota back", async () => {
+    smtpRefuses = true;
+    await subscribe({ email: "v@example.com" });
+    const counts = await testSql()`select count from rate_limits where key like 'covalink:subscribe%:to:%'`;
+    expect(counts.map((r) => Number(r.count))).toEqual([0, 0]);
+  });
+
+  it("a repeat whose email isn't accepted leaves the earlier confirm link confirming the earlier sign-up", async () => {
+    await subscribe({ email: "v@example.com" });
+    smtpRefuses = true;
+    await subscribe({ email: "v@example.com" });
+    expect(sent).toHaveLength(1);
+    expect((await confirm(tokenFrom(sent[0], "confirm"))).status).toBe(200);
+    expect(await exportContacts(alice, profileId)).toEqual([expect.objectContaining({ email: "v@example.com", source: "block" })]);
   });
 
   it("a link stops working 48 hours after its email, even while later sign-ups keep the address listed as pending", async () => {
@@ -314,6 +397,19 @@ describe("subscribe", () => {
     expect(sent).toHaveLength(SUBSCRIBE_LIMITS.perRecipient);
   });
 
+  it("Gmail's dot and googlemail.com aliases share one inbox's quota; the address is kept as typed", async () => {
+    // Synthetic test addresses at the provider's real domains, built from the domain so no literal address is written.
+    const [gmail, googlemail] = ["gmail.com", "googlemail.com"];
+    for (const [i, email] of [`v.w@${gmail}`, `vw@${googlemail}`, `V.W+news@${gmail.toUpperCase()}`, `vw@${gmail}`].entries()) {
+      expect((await subscribe({ email }, { ip: `203.0.113.${i + 1}` })).status).toBe(202);
+    }
+    expect(sent.map((m) => m.to)).toEqual([`v.w@${gmail}`, `vw@${googlemail}`, `v.w+news@${gmail}`]);
+    // Dots matter at other providers, so their addresses keep separate quotas.
+    expect((await subscribe({ email: "v.w@example.com" }, { ip: "203.0.113.9" })).status).toBe(202);
+    expect((await subscribe({ email: "vw@example.com" }, { ip: "203.0.113.10" })).status).toBe(202);
+    expect(sent).toHaveLength(5);
+  });
+
   it("one inbox gets at most three emails an hour, whatever +tag or profile is used; +tags are kept in the stored address", async () => {
     await publishBobSubscribe();
     for (let i = 1; i <= 5; i++) expect((await subscribe({ email: `v+${i}@example.com` }, { ip: `203.0.113.${i}` })).status).toBe(202);
@@ -445,10 +541,7 @@ describe("business card sign-ups", () => {
   const CARD = { displayName: "Alice's Card", color: "#c6f135", shareBack: true, saveContact: false };
   const setCard = (card: object) => testSql()`update profiles set card = ${testSql().json(card as never)} where id = ${profileId}`;
   const cardSignup = (body: Record<string, unknown>) =>
-    handleSubscribe(post("/api/subscribe", { p: profileId, c: "card", name: "Vera Visitor", hp: "", ...body }, { ip: "198.51.100.9" }), {
-      send: (m) => sent.push(m),
-      trustProxy: true,
-    });
+    signedUp(handleSubscribe(post("/api/subscribe", { p: profileId, c: "card", name: "Vera Visitor", hp: "", ...body }, { ip: "198.51.100.9" }), { ...mail, trustProxy: true }));
   const cardRows = async () =>
     (await testSql()`select email, name, phone, note, source, block_id, consent_text from audience_contacts order by email`) as unknown as Record<string, unknown>[];
 

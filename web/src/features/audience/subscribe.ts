@@ -3,13 +3,13 @@ import { createHmac } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { attemptsUsed, consumeAttempt, purgeAttempts } from "@/features/account/throttle";
+import { attemptsUsed, consumeAttempt, purgeAttempts, refundAttempt } from "@/features/account/throttle";
 import { readBounded } from "@/features/analytics/beacon";
 import { isBot } from "@/features/analytics/classify";
 import { getLiveProfileById, getPublishedDocument } from "@/features/profiles/public";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { actionEmail, dispatchMail, tokenLink, type MailMessage } from "@/lib/mail";
+import { actionEmail, afterResponse, scrubMailError, sendMail, tokenLink, type MailMessage } from "@/lib/mail";
 import { ipv6Site, trustedClientAddress } from "@/lib/security/client-address";
 import { isSameOrigin } from "@/lib/security/origin";
 import { canonicalPhone, hasControlChars, hasControlCharsExceptLf } from "@/features/blocks/contact-points";
@@ -44,7 +44,7 @@ export const MAX_SUBSCRIBE_BYTES = 8192;
 /**
  * Sign-ups per window (fixed, from the first attempt): per trusted client address (/64 for IPv6), per IPv6 /48 site,
  * per profile, per owner across their profiles, for the installation, and confirmation emails per recipient (across
- * profiles, `+tag` ignored). Owner and recipient also have a daily cap, and one sender (IPv4 address or IPv6 /48) a
+ * profiles, aliases folded by `recipientKey`). Owner and recipient also have a daily cap, and one sender (IPv4 address or IPv6 /48) a
  * daily cap per owner.
  */
 export const SUBSCRIBE_LIMITS = {
@@ -66,8 +66,18 @@ export const SUBSCRIBE_LIMITS = {
 /** Advisory-lock class for admitting a sender (the list of classes is in features/settings/service.ts). */
 const SENDER_LOCK_CLASS = 727_005;
 
-/** The recipient's limit key: `+tag`s address one inbox under many names. Only the key; the address is stored and sent as typed. */
-export const recipientKey = (email: string) => email.replace(/\+[^@]*(?=@[^@]*$)/, "");
+/**
+ * The recipient's limit key: one inbox under its known aliases, `+tag`s everywhere, and for Gmail also dots and
+ * googlemail.com. Only the key; the address is stored and sent as typed (already lowercase).
+ */
+export function recipientKey(email: string) {
+  const at = email.lastIndexOf("@");
+  let local = email.slice(0, at).replace(/\+.*$/, "");
+  let domain = email.slice(at + 1);
+  if (domain === "googlemail.com") domain = "gmail.com";
+  if (domain === "gmail.com") local = local.replaceAll(".", "");
+  return `${local}@${domain}`;
+}
 
 const emailField = z.string().max(320).trim().toLowerCase().pipe(z.email().max(254));
 
@@ -133,7 +143,10 @@ async function readJson(request: Request): Promise<{ body: unknown } | { refusal
 }
 
 export interface SubscribeDeps {
-  send: (msg: MailMessage) => void;
+  /** Delivers the confirmation email; rejects when it isn't accepted. */
+  send: (msg: MailMessage) => unknown;
+  /** Runs the delivery after the response. */
+  defer: (task: () => Promise<void>) => void;
   trustProxy: boolean;
 }
 
@@ -224,6 +237,8 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   const counted = within
     ? await Promise.all([consumeAttempt(hour, w, L.perRecipient, fixed), consumeAttempt(day, L.daySeconds, L.perRecipientDay, fixed)])
     : [false];
+  // After counting, so a window this attempt opened (stamped while counting) is one a refund can reach.
+  const countedAt = Date.now();
   const send = counted.every(Boolean);
 
   // The email names the page by its address, not the owner-typed display or card name, so an account can't use the
@@ -234,8 +249,8 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
     const consent = card ? cardConsentText(name) : consentText(name);
     const tokens = await recordSignup({ profileId: live.id, blockId, name: visitorName, ...details, email, consentText: consent, rotate: send });
     if (tokens && send) {
-      const confirmUrl = tokenLink("/subscribe/confirm", tokens.confirmToken);
-      const removeUrl = tokenLink("/subscribe/remove", tokens.removeToken);
+      const confirmUrl = tokenLink("/auth/subscribe/confirm", tokens.confirmToken);
+      const removeUrl = tokenLink("/auth/subscribe/remove", tokens.removeToken);
       const content = actionEmail({
         heading: "Confirm your subscription",
         // A card sign-up lists what it shares but echoes none of what the visitor typed (name, phone, note), so the
@@ -248,7 +263,23 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
         footer: { text: "Not you, or changed your mind?", label: "Remove my email", url: removeUrl },
       });
       const msg = { to: email, subject: "Confirm your subscription", ...content };
-      (deps.send ?? ((m: MailMessage) => dispatchMail(m, "subscribe-confirm")))(msg);
+      const { replace } = tokens;
+      // After the response, so it can't depend on SMTP. An email that isn't accepted leaves the earlier link (and what it
+      // confirms) working and gives the recipient's quota back.
+      (deps.defer ?? afterResponse)(async () => {
+        try {
+          await (deps.send ?? sendMail)(msg);
+        } catch (err) {
+          logger.error({ kind: "subscribe-confirm", error: scrubMailError(err) }, "Email delivery failed");
+          await Promise.all([refundAttempt(hour, w, countedAt), refundAttempt(day, L.daySeconds, countedAt)]).catch((e: unknown) =>
+            logger.error({ err: e instanceof Error ? e.name : "unknown" }, "Refunding a recipient's email quota failed"),
+          );
+          return;
+        }
+        await replace?.().catch((e: unknown) =>
+          logger.error({ err: e instanceof Error ? e.name : "unknown", profileId }, "Switching a sign-up to its new link failed"),
+        );
+      });
     }
   } catch (err) {
     logger.error({ err: err instanceof Error ? err.name : "unknown", profileId }, "Recording a sign-up failed");

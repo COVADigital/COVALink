@@ -82,7 +82,11 @@ async function deliver(msg: MailMessage, kind: MailKind) {
  * Never throws.
  */
 export function dispatchMail(msg: MailMessage, kind: MailKind): void {
-  const task = () => deliver(msg, kind);
+  afterResponse(() => deliver(msg, kind));
+}
+
+/** Runs `task` after the response, as `dispatchMail` does; the task must handle its own errors. */
+export function afterResponse(task: () => Promise<void>): void {
   try {
     after(task);
   } catch {
@@ -94,7 +98,7 @@ export function dispatchMail(msg: MailMessage, kind: MailKind): void {
  * The link put in an email. The token travels in the fragment, which browsers
  * never send to a server, so it can't reach access logs, referrers or caches.
  */
-export function tokenLink(page: "/reset-password" | "/verify-email" | "/subscribe/confirm" | "/subscribe/remove", token: string): string {
+export function tokenLink(page: "/reset-password" | "/verify-email" | "/auth/subscribe/confirm" | "/auth/subscribe/remove", token: string): string {
   return `${env().APP_URL.replace(/\/+$/, "")}${page}#token=${encodeURIComponent(token)}`;
 }
 
