@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { buildVCard, vcardFileNames } from "@/features/blocks/vcard";
+import { getCard } from "@/features/cards/service";
 import { getLiveProfileById, getPublishedDocument } from "@/features/profiles/public";
 import { vcardResponseHeaders } from "@/lib/security/headers";
 
@@ -53,4 +54,21 @@ export async function handleVcard(request: Request, profileId: string, blockId: 
   const card = buildVCard(block.config);
   if (!card) return notFound(request);
   return respond(request, 200, card, vcardResponseHeaders(vcardFileNames(block.config)));
+}
+
+/**
+ * `GET`/`HEAD /api/vcard/{profileId}/card`: the business card's contact details, while the card's Save contact switch
+ * is on and the profile is live. Everything else is the same plain 404.
+ */
+export async function handleCardVcard(request: Request, profileId: string): Promise<Response> {
+  if (!uuid.safeParse(profileId).success) return notFound(request);
+  const live = await getLiveProfileById(profileId);
+  if (!live) return notFound(request);
+  const published = await getPublishedDocument(live);
+  if (!published) return notFound(request);
+  const card = await getCard(live.id, published.header.displayName);
+  if (!card.saveContact || !card.contact) return notFound(request);
+  const body = buildVCard(card.contact);
+  if (!body) return notFound(request);
+  return respond(request, 200, body, vcardResponseHeaders(vcardFileNames(card.contact)));
 }

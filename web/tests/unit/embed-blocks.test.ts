@@ -470,6 +470,8 @@ describe("CSP split", () => {
       expect(rules(p), p).toBe(1);
     }
     expect(rules(`/dashboard/profiles/${ID(1)}/qr`)).toBe(0); // The route sets its own.
+    expect(rules(`/dashboard/profiles/${ID(1)}/audience/export`)).toBe(0); // Likewise.
+    for (const p of ["/auth/subscribe/confirm", "/auth/subscribe/remove", `/dashboard/profiles/${ID(1)}/audience`]) expect(rules(p), p).toBe(1);
   });
 
   it("requires every generated frameSrc to match a source", () => {

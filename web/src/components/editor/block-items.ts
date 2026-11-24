@@ -194,6 +194,8 @@ export function itemLabel(item: EditableItem): string {
       return pick(item.values.title, "Untitled video");
     case "music":
       return pick(item.values.title, "Untitled music player");
+    case "subscribe":
+      return pick(item.values.title, "Subscribe form");
   }
 }
 

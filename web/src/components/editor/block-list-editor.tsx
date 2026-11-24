@@ -27,7 +27,7 @@ import {
   Plus,
   Trash,
 } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -41,7 +41,7 @@ import type { Block } from "@/features/blocks/block";
 import { BLOCK_DEFINITIONS, EDITABLE_BLOCK_TYPES, MAX_SOCIAL_ITEMS, type EditableBlockType } from "@/features/blocks/definitions";
 import { MAX_BLOCKS } from "@/features/blocks/input";
 import type { BlockListErrors } from "@/lib/errors";
-import { BLOCK_EDITORS, blockFieldId, FIRST_FIELD, rowControlId, TOUCH_ICON, TOUCH_TARGET, type BlockEditorProps } from "./block-editors";
+import { AudienceContext, BLOCK_EDITORS, blockFieldId, FIRST_FIELD, rowControlId, TOUCH_ICON, TOUCH_TARGET, type BlockEditorProps } from "./block-editors";
 import {
   createItem,
   duplicateItem,
@@ -625,6 +625,8 @@ export function BlockListEditor({ list, disabled, media }: { list: BlockListStat
   }
 
   const full = items.length >= MAX_BLOCKS;
+  const { subscribeEnabled } = useContext(AudienceContext);
+  const addableTypes = EDITABLE_BLOCK_TYPES.filter((t) => t !== "subscribe" || subscribeEnabled);
 
   return (
     <section aria-labelledby="blocks-heading" className="grid gap-3">
@@ -678,7 +680,7 @@ export function BlockListEditor({ list, disabled, media }: { list: BlockListStat
           Add block
         </p>
         <div className="flex flex-wrap gap-2" role="group" aria-labelledby="add-block-label">
-          {EDITABLE_BLOCK_TYPES.map((type) => (
+          {addableTypes.map((type) => (
             <Button
               key={type}
               id={addId(type)}

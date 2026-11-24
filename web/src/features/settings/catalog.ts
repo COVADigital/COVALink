@@ -8,7 +8,7 @@ export type SettingKind = "boolean" | "integer" | "text";
 
 export interface SettingSpec {
   key: string;
-  group: "site" | "registration" | "limits";
+  group: "site" | "registration" | "limits" | "audience";
   label: string;
   description: string;
   kind: SettingKind;
@@ -89,6 +89,15 @@ export const SETTING_SPECS = [
     unit: "days",
     security: false,
   },
+  {
+    key: "audience.subscribeEnabled",
+    group: "audience",
+    label: "Subscribe blocks",
+    description:
+      "Let profile owners collect visitors' email addresses with a Subscribe block. Visitors confirm by email, so it needs email delivery. Turning it off hides every Subscribe block; collected contacts are kept.",
+    kind: "boolean",
+    security: false,
+  },
 ] as const satisfies readonly SettingSpec[];
 
 export type CatalogKey = (typeof SETTING_SPECS)[number]["key"];
@@ -97,6 +106,7 @@ export const SETTING_GROUPS = [
   { id: "site", title: "Site" },
   { id: "registration", title: "Registration" },
   { id: "limits", title: "Limits and retention" },
+  { id: "audience", title: "Audience" },
 ] as const;
 
 export function settingSpec(key: string): SettingSpec | undefined {

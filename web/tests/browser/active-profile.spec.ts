@@ -120,7 +120,8 @@ test("opening a profile that isn't active from the list shows and remembers it",
 test("opening an owned profile's editor or analytics directly does the same", async ({ page }) => {
   await page.goto(`/dashboard/profiles/${shopId}/analytics`);
   await expect(switcher(page)).toContainText("Shop");
-  await expect(analyticsLink(page)).toHaveAttribute("href", `/dashboard/profiles/${shopId}/analytics`);
+  // The sidebar lists the profiles under Analytics and marks the one shown.
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Shop", exact: true })).toHaveAttribute("aria-current", "page");
   await expectRemembered(page, shopId, "Shop");
 
   const actions = countActions(page);

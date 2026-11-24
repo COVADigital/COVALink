@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { TOUCH } from "@/components/admin/styles";
@@ -18,7 +18,7 @@ type Values = z.infer<typeof schema>;
  * The account name, saved through Better Auth's `update-user`; the
  * database hook applies the same rule to every update.
  */
-export function AccountNameForm({ name }: { name: string }) {
+export function AccountNameForm({ name, email }: { name: string; email: ReactNode }) {
   const router = useRouter();
   const [formError, setFormError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -68,9 +68,10 @@ export function AccountNameForm({ name }: { name: string }) {
         error={errors.name?.message}
         {...register("name")}
       />
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" className={TOUCH} disabled={isSubmitting || !isDirty}>
-          {isSubmitting ? "Saving…" : "Save account name"}
+      {email}
+      <div className="grid gap-2">
+        <Button type="submit" className={`w-full ${TOUCH}`} disabled={isSubmitting || !isDirty}>
+          {isSubmitting ? "Saving…" : "Save details"}
         </Button>
         <p ref={statusRef} tabIndex={-1} role="status" className="text-sm text-muted-foreground outline-none">
           {saved ? "Account name saved." : ""}

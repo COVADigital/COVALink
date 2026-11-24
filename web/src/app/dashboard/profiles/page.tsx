@@ -3,9 +3,10 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { AppShell } from "@/components/app-shell";
 import { ProfileStatusBadge } from "@/components/profile-status-badge";
+import { profileLinks } from "@/components/section-links";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { listProfiles } from "@/features/profiles/service";
+import { listOwnedProfiles } from "@/features/profiles/active";
 import { getSetting } from "@/features/settings/service";
 import { requireUser } from "@/lib/auth/session";
 import { CreateProfileForm } from "./create-profile-form";
@@ -22,10 +23,11 @@ export default function ProfilesPage() {
 
 async function Profiles() {
   const user = await requireUser();
-  const [profiles, max] = await Promise.all([listProfiles(user.id), getSetting("profiles.maxPerUser")]);
+  const [profiles, max] = await Promise.all([listOwnedProfiles(user.id), getSetting("profiles.maxPerUser")]);
   const atLimit = profiles.length >= max;
+  const sub = [...profileLinks(profiles, (id) => `/dashboard/profiles/${id}`), { href: "#create", label: "Create a profile" }];
   return (
-    <AppShell user={user} current="profiles">
+    <AppShell user={user} current="profiles" sub={sub}>
       <main className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-8 sm:px-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Profiles</h1>
@@ -67,7 +69,7 @@ async function Profiles() {
           )}
         </section>
 
-        <section aria-labelledby="create-heading" className="rounded-xl border bg-card p-5">
+        <section id="create" aria-labelledby="create-heading" className="scroll-mt-6 rounded-xl border bg-card p-5">
           <h2 id="create-heading" className="mb-4 text-sm font-medium">
             Create a profile
           </h2>

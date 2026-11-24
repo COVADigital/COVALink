@@ -66,6 +66,8 @@ Nothing secret is in the image, the Compose file or the repository, and the imag
 
 **What `true` does:** the client address used for per-client rate limits, and for analytics visitor counts, comes from `X-Forwarded-For` (a single value) or else `X-Real-IP`. Whoever can set those headers chooses their own identity.
 
+**Subscribe blocks and the business card's share-back form need `true`.** Their sign-ups are limited per visitor, so while it's `false` they take no sign-ups: visitors don't see them, and the dashboard and Admin → Settings say why.
+
 **Set `true` only when all of these hold:**
 - the proxy in front **overwrites** `X-Forwarded-For` and `X-Real-IP` with the connecting client's address, rather than appending to them or passing them through;
 - port 3000 can't be reached except through that proxy: no published port, no firewall exception, and no other untrusted container on a shared network (Coolify's "Connect to Predefined Network" option puts the stack on a network that Coolify's other resources use);

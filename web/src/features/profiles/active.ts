@@ -1,8 +1,12 @@
 import "server-only";
 import { cookies } from "next/headers";
+import { cache } from "react";
 import { listProfiles, type ProfileSummary } from "./service";
 
 export const ACTIVE_PROFILE_COOKIE = "covalink_active_profile";
+
+/** The user's profiles, read once per request: the shell and the page both need them. */
+export const listOwnedProfiles = cache(listProfiles);
 
 /**
  * The cookie is only a preference: it is matched against the user's own
@@ -15,7 +19,7 @@ export async function resolveActiveProfile(
   preferredId: string | undefined,
   viewedId?: string,
 ): Promise<{ active: ProfileSummary | null; all: ProfileSummary[]; sync: boolean }> {
-  const all = await listProfiles(ownerId);
+  const all = await listOwnedProfiles(ownerId);
   const viewed = viewedId ? all.find((p) => p.id === viewedId) : undefined;
   const active = viewed ?? all.find((p) => p.id === preferredId) ?? all[0] ?? null;
   return { active, all, sync: viewed !== undefined && viewed.id !== preferredId };

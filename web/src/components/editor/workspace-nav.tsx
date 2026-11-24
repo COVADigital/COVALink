@@ -1,6 +1,6 @@
 "use client";
 
-import { ChartLine, LayoutGrid, LogOut, Menu, Monitor, Moon, Shield, Sun, User, type LucideIcon } from "lucide-react";
+import { ChartLine, IdCard, LayoutGrid, LogOut, Menu, Monitor, Moon, Shield, Sun, User, Users, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useSignOut } from "@/components/auth/sign-out-button";
@@ -28,9 +28,9 @@ export type { WorkspaceLink };
  * bar.
  */
 
-const ICONS: Record<WorkspaceLink["icon"], LucideIcon> = { profiles: LayoutGrid, analytics: ChartLine, account: User, admin: Shield };
+const ICONS: Record<WorkspaceLink["icon"], LucideIcon> = { profiles: LayoutGrid, analytics: ChartLine, audience: Users, card: IdCard, account: User, admin: Shield };
 
-function Mark() {
+export function Mark() {
   return (
     <svg viewBox="0 0 32 32" className="size-8" aria-hidden="true">
       <rect width="32" height="32" rx="8" fill="var(--cl-ink)" />
@@ -90,7 +90,7 @@ export function WorkspaceRail({ links, current }: { links: WorkspaceLink[]; curr
 export function WorkspaceMenu({ links, label = "Workspace menu", className }: { links: WorkspaceLink[]; label?: string; className?: string }) {
   const { signOut, pending, failed } = useSignOut();
   const mode = useColorMode();
-  const [, startTransition] = useTransition();
+  const [themePending, startTransition] = useTransition();
   const [themeFailed, setThemeFailed] = useState(false);
   const chooseTheme = (value: string) =>
     startTransition(async () => {
@@ -130,7 +130,7 @@ export function WorkspaceMenu({ links, label = "Workspace menu", className }: { 
         <DropdownMenuLabel>Dashboard theme</DropdownMenuLabel>
         <DropdownMenuRadioGroup aria-label="Dashboard theme" value={mode} onValueChange={chooseTheme}>
           {THEMES.map(({ value, label, Icon }) => (
-            <DropdownMenuRadioItem key={value} value={value} className="min-h-11 ed-lg:min-h-9" onSelect={(e) => e.preventDefault()}>
+            <DropdownMenuRadioItem key={value} value={value} disabled={themePending} className="min-h-11 ed-lg:min-h-9" onSelect={(e) => e.preventDefault()}>
               <Icon aria-hidden="true" />
               {label}
             </DropdownMenuRadioItem>
