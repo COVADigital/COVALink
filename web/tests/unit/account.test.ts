@@ -17,6 +17,7 @@ import { BLOCKED_AUTH_PATHS, isBlockedAuthPath, isBlockedAuthRequest } from "@/l
 import { productionConfigIssues } from "@/lib/config/production";
 import { PAGE_HEADERS_SOURCE, PROFILE_HEADERS_SOURCE, securityHeaders, TOKEN_PAGE_HEADERS_SOURCE, tokenPageHeaders } from "@/lib/security/headers";
 import { safeInternalPath } from "@/lib/validation/url";
+import nextConfig from "../../next.config";
 
 const pathToRegexp = untypedPathToRegexp as (path: string) => RegExp;
 const bs = String.fromCharCode(92);
@@ -184,6 +185,16 @@ describe("token-page headers", () => {
     // Downloads that set their own headers (one CSP each) stay out of the page rule; the card page itself doesn't.
     for (const p of ["/dashboard/profiles/x/qr", "/dashboard/profiles/x/card/download", "/dashboard/profiles/x/audience/export"]) expect(page.test(p), p).toBe(false);
     expect(page.test("/dashboard/profiles/x/card")).toBe(true);
+  });
+
+  it("redirects subscriber links emailed before the move to the /auth pages, and nothing else", async () => {
+    const [rule, ...rest] = (await nextConfig.redirects?.()) ?? [];
+    expect(rest).toEqual([]);
+    expect(rule).toEqual(expect.objectContaining({ destination: "/auth/subscribe/:action", permanent: false }));
+    const old = pathToRegexp(rule.source);
+    for (const p of ["/subscribe/confirm", "/subscribe/remove"]) expect(old.test(p), p).toBe(true);
+    // A profile with the handle "subscribe" and every other path stay as they are.
+    for (const p of ["/subscribe", "/subscribe/other", "/subscribe/confirm/x", "/auth/subscribe/confirm"]) expect(old.test(p), p).toBe(false);
   });
 });
 

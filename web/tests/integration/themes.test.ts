@@ -243,12 +243,13 @@ describe("stored themes the editor can't carry", () => {
     expect((await storedDraft(id)).header).toMatchObject({ displayName: "Alice Renamed" });
 
     const before = await rawRow(id);
+    // Started one at a time: built up front, the later attempts would reject before anything awaits them.
     for (const attempt of [
-      svc.publishProfile(alice, id, { expectedRevision: 1 }),
-      svc.publishProfile(alice, id, { expectedRevision: 1, patch: header }),
-      save(alice, id, 1, { theme: neon() }),
+      () => svc.publishProfile(alice, id, { expectedRevision: 1 }),
+      () => svc.publishProfile(alice, id, { expectedRevision: 1, patch: header }),
+      () => save(alice, id, 1, { theme: neon() }),
     ]) {
-      const err = await failure(attempt);
+      const err = await failure(attempt());
       expect(err?.code).toBe("VALIDATION");
     }
     expect((await failure(svc.publishProfile(alice, id, { expectedRevision: 1 })))?.message).toMatch(/can't be read/);

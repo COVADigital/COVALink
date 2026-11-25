@@ -53,6 +53,15 @@ export async function sendMail(msg: MailMessage): Promise<void> {
   await getTransporter().sendMail({ from: env().SMTP_FROM, ...msg });
 }
 
+/** True only when the mail server certainly didn't take the message: an SMTP 4xx or 5xx reply, or a failure before sending. */
+export function mailRefused(err: unknown): boolean {
+  const { code, responseCode } = scrubMailError(err);
+  if (responseCode !== undefined) return responseCode >= 400 && responseCode < 600;
+  // Failures before any message is handed over. A timeout or a dropped connection (ETIMEDOUT, ESOCKET, ECONNECTION) can
+  // come after the server took the message, so they don't count.
+  return code !== undefined && ["EDNS", "ETLS", "EAUTH", "ENOAUTH", "EENVELOPE"].includes(code);
+}
+
 /**
  * Only fixed, non-identifying fields of a delivery error: SMTP and socket
  * errors can quote the recipient or the message, which carries a token.
