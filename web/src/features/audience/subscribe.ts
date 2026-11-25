@@ -9,7 +9,7 @@ import { isBot } from "@/features/analytics/classify";
 import { getLiveProfileById, getPublishedDocument } from "@/features/profiles/public";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { actionEmail, afterResponse, scrubMailError, sendMail, tokenLink, type MailMessage } from "@/lib/mail";
+import { actionEmail, afterResponse, mailRefused, scrubMailError, sendMail, tokenLink, type MailMessage } from "@/lib/mail";
 import { ipv6Site, trustedClientAddress } from "@/lib/security/client-address";
 import { isSameOrigin } from "@/lib/security/origin";
 import { canonicalPhone, hasControlChars, hasControlCharsExceptLf } from "@/features/blocks/contact-points";
@@ -240,6 +240,9 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   // After counting, so a window this attempt opened (stamped while counting) is one a refund can reach.
   const countedAt = Date.now();
   const send = counted.every(Boolean);
+  const refund = (i: number) => (i === 0 ? refundAttempt(hour, w, countedAt) : refundAttempt(day, L.daySeconds, countedAt));
+  // A concurrent sign-up can fill one window between the check and the count; nothing is sent, so the other's unit goes back.
+  if (within && !send) await Promise.all(counted.map((ok, i) => ok && refund(i)));
 
   // The email names the page by its address, not the owner-typed display or card name, so an account can't use the
   // form to deliver its own text to arbitrary inboxes. The stored consent wording keeps the name the visitor saw.
@@ -265,20 +268,25 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
       const msg = { to: email, subject: "Confirm your subscription", ...content };
       const { replace } = tokens;
       // After the response, so it can't depend on SMTP. An email that isn't accepted leaves the earlier link (and what it
-      // confirms) working and gives the recipient's quota back.
+      // confirms) working; one the server certainly refused also gives the recipient's quota back. A timeout or dropped
+      // connection may come after the server took the email, so that keeps the quota (the email may have arrived).
       (deps.defer ?? afterResponse)(async () => {
         try {
           await (deps.send ?? sendMail)(msg);
         } catch (err) {
           logger.error({ kind: "subscribe-confirm", error: scrubMailError(err) }, "Email delivery failed");
-          await Promise.all([refundAttempt(hour, w, countedAt), refundAttempt(day, L.daySeconds, countedAt)]).catch((e: unknown) =>
-            logger.error({ err: e instanceof Error ? e.name : "unknown" }, "Refunding a recipient's email quota failed"),
-          );
+          if (mailRefused(err)) {
+            await Promise.all([refund(0), refund(1)]).catch((e: unknown) =>
+              logger.error({ err: e instanceof Error ? e.name : "unknown" }, "Refunding a recipient's email quota failed"),
+            );
+          }
           return;
         }
-        await replace?.().catch((e: unknown) =>
-          logger.error({ err: e instanceof Error ? e.name : "unknown", profileId }, "Switching a sign-up to its new link failed"),
-        );
+        // The email is out, so its link must work: one retry covers a passing database error (the update is idempotent).
+        await replace
+          ?.()
+          .catch(() => replace())
+          .catch((e: unknown) => logger.error({ err: e instanceof Error ? e.name : "unknown", profileId }, "Switching a sign-up to its new link failed"));
       });
     }
   } catch (err) {

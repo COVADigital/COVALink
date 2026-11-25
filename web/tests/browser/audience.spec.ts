@@ -88,9 +88,10 @@ async function signUp(browser: Browser, email: string) {
   await context.close();
 }
 
-async function useLink(browser: Browser, action: "confirm" | "remove", token: string) {
+/** `/subscribe` is where links emailed before the pages moved under /auth point; they redirect, keeping the token. */
+async function useLink(browser: Browser, action: "confirm" | "remove", token: string, base: "/auth/subscribe" | "/subscribe" = "/auth/subscribe") {
   const { context, page } = await visitor(browser);
-  await page.goto(`${MAIL}/auth/subscribe/${action}#token=${encodeURIComponent(token)}`);
+  await page.goto(`${MAIL}${base}/${action}#token=${encodeURIComponent(token)}`);
   const button = page.getByRole("button", { name: action === "confirm" ? "Confirm subscription" : "Remove my email" });
   await expect(button).toBeVisible();
   expect(page.url()).toBe(`${MAIL}/auth/subscribe/${action}`);
@@ -226,7 +227,7 @@ test("a confirmed subscriber removes themselves with the email's remove link", a
   await clearSink();
   await signUp(browser, LEAVER);
   const tokens = await tokensFor(LEAVER);
-  (await useLink(browser, "confirm", tokens.confirm)).context.close();
+  (await useLink(browser, "confirm", tokens.confirm, "/subscribe")).context.close(); // An old-style link still works.
 
   await page.goto(`${profileUrl}/audience`);
   await expect(page.getByRole("row").filter({ hasText: LEAVER })).toBeVisible();

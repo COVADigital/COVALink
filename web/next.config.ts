@@ -35,6 +35,12 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false,
+  async redirects() {
+    return [
+      // Subscriber links emailed before the pages moved under /auth. Browsers keep the #token fragment across a redirect.
+      { source: "/subscribe/:action(confirm|remove)", destination: "/auth/subscribe/:action", permanent: false },
+    ];
+  },
   async headers() {
     return [
       // Everything except uploaded media, the QR download (which sets its own), the token pages, the exact vCard route and public profiles gets the page headers.

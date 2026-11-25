@@ -52,10 +52,13 @@ function post(path: string, body: unknown, init: { origin?: string | null; type?
 }
 /** Delivery runs after the response; `signedUp` waits for it, so a test sees what an accepted (or refused) email left. */
 let smtpRefuses = false;
+/** An ambiguous failure: the server may already have taken the email. */
+let smtpTimesOut = false;
 const deliveries: Promise<void>[] = [];
 const mail = {
   send: async (m: MailMessage) => {
     if (smtpRefuses) throw Object.assign(new Error("Message rejected"), { responseCode: 550 });
+    if (smtpTimesOut) throw Object.assign(new Error("Timeout"), { code: "ETIMEDOUT" });
     sent.push(m);
   },
   defer: (task: () => Promise<void>) => void deliveries.push(task()),
@@ -87,6 +90,7 @@ beforeEach(async () => {
   Object.assign(status, { emailReady: true, subscribeEnabled: true });
   sent = [];
   smtpRefuses = false;
+  smtpTimesOut = false;
   await bootstrapSuperAdmin({ token: TEST_SETUP_TOKEN, name: "Owner", email: "owner@example.com", password: "correct-horse-battery" });
   for (const email of ["alice@example.com", "bob@example.com"]) expect((await signUp(email)).status).toBe(200);
   [alice, bob] = await Promise.all(["alice@example.com", "bob@example.com"].map(idOf));
@@ -247,6 +251,47 @@ describe("subscribe", () => {
     await subscribe({ email: "v@example.com" });
     const counts = await testSql()`select count from rate_limits where key like 'covalink:subscribe%:to:%'`;
     expect(counts.map((r) => Number(r.count))).toEqual([0, 0]);
+  });
+
+  it("a delivery that may have reached the server keeps the quota and the earlier link", async () => {
+    await subscribe({ email: "v@example.com" });
+    smtpTimesOut = true;
+    await subscribe({ email: "v@example.com" });
+    const counts = await testSql()`select count from rate_limits where key like 'covalink:subscribe%:to:%'`;
+    expect(counts.map((r) => Number(r.count))).toEqual([2, 2]); // Not given back: the email may have arrived.
+    expect((await confirm(tokenFrom(sent[0], "confirm"))).status).toBe(200);
+  });
+
+  it("concurrent sign-ups for one address use a recipient unit only for each email sent", async () => {
+    await subscribe({ email: "v@example.com" });
+    await subscribe({ email: "v@example.com" });
+    // One unit left this hour; whichever requests lose the race send nothing and keep no daily unit.
+    await Promise.all(Array.from({ length: 4 }, () => subscribe({ email: "v@example.com" })));
+    const [day] = await testSql()`select count from rate_limits where key like 'covalink:subscribe-day:to:%'`;
+    expect(Number(day.count)).toBe(sent.length);
+    expect(sent.length).toBe(3);
+  });
+
+  it("a repeat's accepted email gets a working link even if switching to it fails once", async () => {
+    await subscribe({ email: "v@example.com" });
+    const sql = testSql();
+    // The first token switch fails, as a passing database error would; sequences aren't rolled back with it.
+    // Cleared first, in case an aborted run left them behind (resetDatabase only empties tables).
+    await sql.unsafe(`
+      drop trigger if exists fail_once on audience_contacts; drop function if exists fail_once(); drop sequence if exists fail_once_seq;
+      create sequence fail_once_seq;
+      create function fail_once() returns trigger language plpgsql as $$
+        begin if nextval('fail_once_seq') = 1 then raise exception 'transient'; end if; return new; end $$;
+      create trigger fail_once before update on audience_contacts for each row
+        when (old.confirm_token_hash is distinct from new.confirm_token_hash) execute function fail_once();`);
+    try {
+      await new Promise((r) => setTimeout(r, 5)); // A later sign-up time than the first.
+      await subscribe({ email: "v@example.com" });
+    } finally {
+      await sql.unsafe("drop trigger fail_once on audience_contacts; drop function fail_once(); drop sequence fail_once_seq;");
+    }
+    expect(sent).toHaveLength(2);
+    expect((await confirm(tokenFrom(sent[1], "confirm"))).status).toBe(200);
   });
 
   it("a repeat whose email isn't accepted leaves the earlier confirm link confirming the earlier sign-up", async () => {
