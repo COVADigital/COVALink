@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 import {
+  DOWNLOAD_HEADERS_SOURCE,
+  downloadSecurityHeaders,
   mediaResponseHeaders,
   PAGE_HEADERS_SOURCE,
   PROFILE_HEADERS_SOURCE,
@@ -43,7 +45,7 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
-      // Everything except uploaded media, the QR download (which sets its own), the token pages, the exact vCard route and public profiles gets the page headers.
+      // Everything except uploaded media, the owner downloads, the token pages, the exact vCard route and public profiles gets the page headers.
       { source: PAGE_HEADERS_SOURCE, headers: securityHeaders({ isDev: process.env.NODE_ENV === "development" }) },
       // Public profile paths: the page headers with the provider players' frame-src.
       { source: PROFILE_HEADERS_SOURCE, headers: profileSecurityHeaders({ isDev: process.env.NODE_ENV === "development" }) },
@@ -51,6 +53,8 @@ const nextConfig: NextConfig = {
       { source: TOKEN_PAGE_HEADERS_SOURCE, headers: tokenPageHeaders({ isDev: process.env.NODE_ENV === "development" }) },
       // Uploaded media gets the media headers (also set by the route itself).
       { source: "/media/:path*", headers: Object.entries(mediaResponseHeaders()).map(([key, value]) => ({ key, value })) },
+      // The owner downloads (QR, card, contacts): their security headers, also on responses Next.js generates there (405).
+      { source: DOWNLOAD_HEADERS_SOURCE, headers: Object.entries(downloadSecurityHeaders()).map(([key, value]) => ({ key, value })) },
       // Exactly /api/vcard/{profileId}/{blockId}: the vCard security headers, also on responses Next.js generates there.
       { source: VCARD_HEADERS_SOURCE, headers: Object.entries(vcardSecurityHeaders()).map(([key, value]) => ({ key, value })) },
     ];

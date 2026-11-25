@@ -24,20 +24,30 @@ export async function consumeAttempt(
   key: string,
   windowSeconds: number,
   max: number,
-  { refusedExtend = true, exec = db }: { refusedExtend?: boolean; exec?: Exec } = {},
+  opts: { refusedExtend?: boolean; exec?: Exec } = {},
 ): Promise<boolean> {
+  return (await countAttempt(key, windowSeconds, max, opts)).within;
+}
+
+/** `consumeAttempt`, also naming the window counted in (its start, the row's `last_request`) for `refundAttempt`. */
+export async function countAttempt(
+  key: string,
+  windowSeconds: number,
+  max: number,
+  { refusedExtend = true, exec = db }: { refusedExtend?: boolean; exec?: Exec } = {},
+): Promise<{ within: boolean; window: number }> {
   const now = Date.now();
   const cutoff = now - windowSeconds * 1000;
   // In a fixed window `last_request` is the window's start.
   const keep = refusedExtend ? sql`false` : sql`rate_limits.last_request >= ${cutoff}`;
-  const rows = await exec.execute<{ count: number }>(sql`
+  const rows = await exec.execute<{ count: number; last_request: number }>(sql`
     insert into rate_limits (id, key, count, last_request)
     values (${crypto.randomUUID()}, ${`covalink:${key}`}, 1, ${now})
     on conflict (key) do update set
       count = case when rate_limits.last_request < ${cutoff} then 1 else rate_limits.count + 1 end,
       last_request = case when ${keep} then rate_limits.last_request else ${now} end
-    returning count`);
-  return Number(rows[0]?.count) <= max;
+    returning count, last_request`);
+  return { within: Number(rows[0]?.count) <= max, window: Number(rows[0]?.last_request) };
 }
 
 /** Attempts counted against `key` in the current window, without counting one or creating a row. */
@@ -49,14 +59,13 @@ export async function attemptsUsed(key: string, windowSeconds: number, exec: Exe
 }
 
 /**
- * Gives back one attempt counted (at `countedAt`) against `key` in a fixed window, for an action that was counted but
- * didn't happen. Only while that window is current: a window started after `countedAt` keeps its count.
+ * Gives back one attempt counted against `key` in a fixed window, for an action that was counted but didn't happen.
+ * Only in that same window (`window` from `countAttempt`): a window started since keeps its count. Matching the
+ * window's start, not comparing clocks, keeps this exact when app servers' clocks differ.
  */
-export async function refundAttempt(key: string, windowSeconds: number, countedAt: number): Promise<void> {
-  const cutoff = Date.now() - windowSeconds * 1000;
+export async function refundAttempt(key: string, window: number): Promise<void> {
   await db.execute(sql`
-    update rate_limits set count = count - 1
-    where key = ${`covalink:${key}`} and count > 0 and last_request >= ${cutoff} and last_request <= ${countedAt}`);
+    update rate_limits set count = count - 1 where key = ${`covalink:${key}`} and count > 0 and last_request = ${window}`);
 }
 
 /** Deletes this module's rows under `prefix` whose window has passed. */

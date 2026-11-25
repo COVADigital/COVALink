@@ -232,6 +232,23 @@ describe("owner-only dashboard and QR", () => {
     expect(jsQR(new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength), info.width, info.height)?.data).toBe(`${BASE.replace("127.0.0.1", "localhost")}/ana?src=qr`);
     expect((await page(`/dashboard/profiles/${profileId}/qr`, otherCookie)).status).toBe(404);
   });
+
+  it("the owner downloads answer other methods with a 405 that carries one copy of their security headers", async () => {
+    for (const file of ["qr", "card/download", "audience/export"]) {
+      const res = await fetch(`${BASE}/dashboard/profiles/${profileId}/${file}`, {
+        method: "PUT",
+        redirect: "manual",
+        headers: { "x-forwarded-for": nextIp(), cookie: ownerCookie },
+      });
+      expect(res.status, file).toBe(405);
+      // `get` joins repeated fields, so an exact value also means a single copy.
+      expect(res.headers.get("content-security-policy"), file).toBe("sandbox; default-src 'none'");
+      expect(res.headers.get("x-content-type-options"), file).toBe("nosniff");
+      expect(res.headers.get("cache-control"), file).toBe("private, no-store");
+      expect(res.headers.get("x-frame-options"), file).toBe("DENY");
+      expect(res.headers.get("referrer-policy"), file).toBe("no-referrer");
+    }
+  });
 });
 
 describe("privacy", () => {

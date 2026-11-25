@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { attemptsUsed, consumeAttempt, purgeAttempts, refundAttempt } from "@/features/account/throttle";
+import { attemptsUsed, consumeAttempt, countAttempt, purgeAttempts, refundAttempt } from "@/features/account/throttle";
 import { readBounded } from "@/features/analytics/beacon";
 import { isBot } from "@/features/analytics/classify";
 import { getLiveProfileById, getPublishedDocument } from "@/features/profiles/public";
@@ -235,14 +235,17 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
   // owner's list looks the same whether or not this address's installation-wide quota is used up.
   const within = (await attemptsUsed(hour, w)) < L.perRecipient && (await attemptsUsed(day, L.daySeconds)) < L.perRecipientDay;
   const counted = within
-    ? await Promise.all([consumeAttempt(hour, w, L.perRecipient, fixed), consumeAttempt(day, L.daySeconds, L.perRecipientDay, fixed)])
-    : [false];
-  // After counting, so a window this attempt opened (stamped while counting) is one a refund can reach.
-  const countedAt = Date.now();
-  const send = counted.every(Boolean);
-  const refund = (i: number) => (i === 0 ? refundAttempt(hour, w, countedAt) : refundAttempt(day, L.daySeconds, countedAt));
-  // A concurrent sign-up can fill one window between the check and the count; nothing is sent, so the other's unit goes back.
-  if (within && !send) await Promise.all(counted.map((ok, i) => ok && refund(i)));
+    ? await Promise.all([countAttempt(hour, w, L.perRecipient, fixed), countAttempt(day, L.daySeconds, L.perRecipientDay, fixed)])
+    : [];
+  const send = within && counted.every((c) => c.within);
+  // Each unit goes back to the window it was counted in, if that window is still current.
+  const refundAll = () =>
+    Promise.all([refundAttempt(hour, counted[0].window), refundAttempt(day, counted[1].window)]).catch((e: unknown) =>
+      logger.error({ err: e instanceof Error ? e.name : "unknown" }, "Refunding a recipient's email quota failed"),
+    );
+  // A concurrent sign-up can fill a window between the check and the count. Nothing is sent, so both units go back,
+  // the one over the limit too. After the response, so losing a race doesn't take longer to answer.
+  if (within && !send) (deps.defer ?? afterResponse)(async () => void (await refundAll()));
 
   // The email names the page by its address, not the owner-typed display or card name, so an account can't use the
   // form to deliver its own text to arbitrary inboxes. The stored consent wording keeps the name the visitor saw.
@@ -275,11 +278,7 @@ export async function handleSubscribe(request: Request, deps: Partial<SubscribeD
           await (deps.send ?? sendMail)(msg);
         } catch (err) {
           logger.error({ kind: "subscribe-confirm", error: scrubMailError(err) }, "Email delivery failed");
-          if (mailRefused(err)) {
-            await Promise.all([refund(0), refund(1)]).catch((e: unknown) =>
-              logger.error({ err: e instanceof Error ? e.name : "unknown" }, "Refunding a recipient's email quota failed"),
-            );
-          }
+          if (mailRefused(err)) await refundAll();
           return;
         }
         // The email is out, so its link must work: one retry covers a passing database error (the update is idempotent).
