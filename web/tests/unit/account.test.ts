@@ -15,7 +15,17 @@ import {
 } from "@/features/account/schema";
 import { BLOCKED_AUTH_PATHS, isBlockedAuthPath, isBlockedAuthRequest } from "@/lib/auth/blocked-paths";
 import { productionConfigIssues } from "@/lib/config/production";
-import { PAGE_HEADERS_SOURCE, PROFILE_HEADERS_SOURCE, securityHeaders, TOKEN_PAGE_HEADERS_SOURCE, tokenPageHeaders } from "@/lib/security/headers";
+import {
+  csvResponseHeaders,
+  DOWNLOAD_HEADERS_SOURCE,
+  downloadSecurityHeaders,
+  PAGE_HEADERS_SOURCE,
+  PROFILE_HEADERS_SOURCE,
+  qrResponseHeaders,
+  securityHeaders,
+  TOKEN_PAGE_HEADERS_SOURCE,
+  tokenPageHeaders,
+} from "@/lib/security/headers";
 import { safeInternalPath } from "@/lib/validation/url";
 import nextConfig from "../../next.config";
 
@@ -185,6 +195,22 @@ describe("token-page headers", () => {
     // Downloads that set their own headers (one CSP each) stay out of the page rule; the card page itself doesn't.
     for (const p of ["/dashboard/profiles/x/qr", "/dashboard/profiles/x/card/download", "/dashboard/profiles/x/audience/export"]) expect(page.test(p), p).toBe(false);
     expect(page.test("/dashboard/profiles/x/card")).toBe(true);
+  });
+
+  it("gives exactly the owner downloads the download headers, which every download response repeats", () => {
+    // Compiled the way Next.js compiles `headers()` sources.
+    const opts = { strict: true, sensitive: false, delimiter: "/" };
+    const compile = untypedPathToRegexp as (path: string, keys: unknown[], options: object) => RegExp;
+    const page = compile(PAGE_HEADERS_SOURCE, [], opts);
+    const download = compile(DOWNLOAD_HEADERS_SOURCE, [], opts);
+    for (const p of ["/dashboard/profiles/x/qr", "/dashboard/profiles/x/card/download", "/dashboard/profiles/x/audience/export"]) {
+      expect([page.test(p), download.test(p)], p).toEqual([false, true]);
+    }
+    for (const p of ["/dashboard/profiles/x", "/dashboard/profiles/x/card", "/dashboard/profiles/x/audience", "/dashboard/profiles/x/qr/extra", "/dashboard/profiles/x/y/qr", "/dashboard/profiles/x/qrcode"]) {
+      expect([page.test(p), download.test(p)], p).toEqual([true, false]);
+    }
+    for (const h of [qrResponseHeaders("a.svg"), csvResponseHeaders("a.csv")]) expect(h).toMatchObject(downloadSecurityHeaders());
+    expect(downloadSecurityHeaders()).not.toHaveProperty("content-disposition");
   });
 
   it("redirects subscriber links emailed before the move to the /auth pages, and nothing else", async () => {

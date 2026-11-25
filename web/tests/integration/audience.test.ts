@@ -15,7 +15,7 @@ vi.mock("@/features/audience/status", async (importOriginal) => ({
 }));
 
 import { deleteContact, exportContacts, listContacts, PENDING_TTL_HOURS } from "@/features/audience/service";
-import { attemptsUsed, consumeAttempt, refundAttempt } from "@/features/account/throttle";
+import { attemptsUsed, countAttempt, refundAttempt } from "@/features/account/throttle";
 import { handleSubscribe, handleSubscribeToken, SUBSCRIBE_LIMITS } from "@/features/audience/subscribe";
 import * as svc from "@/features/profiles/service";
 import { bootstrapSuperAdmin } from "@/features/setup/service";
@@ -239,11 +239,79 @@ describe("subscribe", () => {
 
   it("a refund gives back an attempt only in the window it was counted in", async () => {
     const key = "subscribe:to:refund-test";
-    await consumeAttempt(key, 3600, 3, { refusedExtend: false });
-    await refundAttempt(key, 3600, Date.now() - 2 * 3600_000); // Counted in an earlier window: the current one keeps it.
+    const { window: old } = await countAttempt(key, 3600, 3, { refusedExtend: false });
+    // The window expires and a new one starts: a unit counted in the old one isn't taken from it.
+    await testSql()`update rate_limits set last_request = last_request - 2 * 3600000 where key = ${`covalink:${key}`}`;
+    const { window } = await countAttempt(key, 3600, 3, { refusedExtend: false });
+    await refundAttempt(key, old);
+    await refundAttempt(key, old - 2 * 3600_000);
     expect(await attemptsUsed(key, 3600)).toBe(1);
-    await refundAttempt(key, 3600, Date.now());
+    await refundAttempt(key, window);
     expect(await attemptsUsed(key, 3600)).toBe(0);
+  });
+
+  /** Counts of the recipient's hourly and daily rows, in that order. */
+  const recipientCounts = async () =>
+    (await testSql()`select count from rate_limits where key like 'covalink:subscribe%:to:%' order by key like '%-day:%'`).map((r) => Number(r.count));
+
+  /**
+   * Makes a concurrent sign-up fill the recipient's daily window exactly between this request's check and its count
+   * (the second unit counted there becomes one over the limit), and with `failRefund` makes every refund fail.
+   */
+  async function withDailyRace(run: () => Promise<unknown>, failRefund = false) {
+    const sql = testSql();
+    const over = SUBSCRIBE_LIMITS.perRecipientDay + 1;
+    await sql.unsafe(`
+      drop trigger if exists race_day on rate_limits; drop function if exists race_day();
+      create function race_day() returns trigger language plpgsql as $$ begin
+        if new.key like 'covalink:subscribe-day:to:%' and old.count = 1 and new.count = 2 then new.count := ${over}; end if;
+        if ${failRefund} and new.key like 'covalink:subscribe%:to:%' and new.count < old.count then raise exception 'refund'; end if;
+        return new; end $$;
+      create trigger race_day before update on rate_limits for each row execute function race_day();`);
+    try {
+      return await run();
+    } finally {
+      await sql.unsafe("drop trigger race_day on rate_limits; drop function race_day();");
+    }
+  }
+
+  it("a sign-up that loses a race for the recipient's quota sends nothing and gives back both units, the one over the limit too", async () => {
+    await subscribe({ email: "v@example.com" });
+    const res = (await withDailyRace(async () => {
+      const later: (() => Promise<void>)[] = [];
+      const body = { p: profileId, b: ID(1), hp: "", email: "v@example.com" };
+      const r = await handleSubscribe(post("/api/subscribe", body, { ip: "198.51.100.1" }), { ...mail, defer: (t) => void later.push(t), trustProxy: true });
+      // Answered before the refund runs, so losing the race takes no longer to answer.
+      expect(await recipientCounts()).toEqual([2, SUBSCRIBE_LIMITS.perRecipientDay + 1]);
+      for (const task of later) await task();
+      return r;
+    })) as Response;
+    expect(res.status).toBe(202);
+    expect(sent).toHaveLength(1);
+    // The hour keeps only the first email; the day is back at its limit, not over it.
+    expect(await recipientCounts()).toEqual([1, SUBSCRIBE_LIMITS.perRecipientDay]);
+  });
+
+  it("a failed refund after a lost race still answers the same 202", async () => {
+    await subscribe({ email: "v@example.com" });
+    const res = (await withDailyRace(() => subscribe({ email: "v@example.com" }), true)) as Response;
+    expect(res.status).toBe(202);
+    expect(sent).toHaveLength(1);
+    expect(await recipientCounts()).toEqual([2, SUBSCRIBE_LIMITS.perRecipientDay + 1]);
+  });
+
+  it("either cap alone stops the email without counting against the other", async () => {
+    const L = SUBSCRIBE_LIMITS;
+    await subscribe({ email: "v@example.com" });
+    // The daily cap is full while the hour has room.
+    await testSql()`update rate_limits set count = ${L.perRecipientDay} where key like 'covalink:subscribe-day:to:%'`;
+    await subscribe({ email: "v@example.com" });
+    expect(await recipientCounts()).toEqual([1, L.perRecipientDay]);
+    // The hourly cap is full while the day has room.
+    await testSql()`update rate_limits set count = case when key like '%-day:%' then 5 else ${L.perRecipient} end where key like 'covalink:subscribe%:to:%'`;
+    await subscribe({ email: "v@example.com" });
+    expect(await recipientCounts()).toEqual([L.perRecipient, 5]);
+    expect(sent).toHaveLength(1);
   });
 
   it("a first sign-up whose email isn't accepted gives the recipient's whole quota back", async () => {
