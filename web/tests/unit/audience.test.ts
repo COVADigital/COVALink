@@ -14,6 +14,31 @@ describe("CSV export rows", () => {
     for (const cell of ["=HYPERLINK(1)", "+1", "-1", "@SUM(A1)", "\tx", "\rx"]) expect(csvRow([cell]).replace(/^"/, "")).toMatch(/^'/);
     expect(csvRow(["line\nbreak"])).toBe('"line\nbreak"');
   });
+
+  it("keeps a cell with a semicolon quoted and defuses a formula after it", () => {
+    expect(csvRow(["a;b"])).toBe('"a;b"');
+    expect(csvRow(["x;=1+1", "ok"])).toBe("\"x;'=1+1\",ok");
+    expect(csvRow(['=a;"b"'])).toBe('"\'=a;\'""b"""');
+  });
+
+  it("leaves no formula-looking field when a row is split like a semicolon-separated sheet", () => {
+    // Such a parser honours a quote only at the start of a field: split records on line breaks, then fields on `;`.
+    const fields = (row: string) => row.split(/\r\n|\n|\r/).flatMap((record) => record.split(";"));
+    const payloads = [
+      ...["=", "+", "-", "@", "\t", "\r"].map((lead) => `x;${lead}1+1;x`),
+      'x;"=1+1;x',
+      "a\n=1+1;x",
+      "a\r\n=1+1;x",
+      'a\n"=1+1;x',
+    ];
+    for (const payload of payloads) {
+      for (const row of [csvRow(["visitor", payload, "n"]), csvRow(["n", "visitor", payload])]) {
+        for (const field of fields(row)) expect(field).not.toMatch(/^[=+\-@\t\r"]/);
+      }
+    }
+    expect(csvRow(["visitor", "x;=1+1;", "n"])).toBe("visitor,\"x;'=1+1;\",n");
+    expect(csvRow(["a\r\n=1"])).toBe("\"a\r\n'=1\"");
+  });
 });
 
 describe("display name in sign-up text", () => {
