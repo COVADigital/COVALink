@@ -14,6 +14,12 @@ describe("CSV export rows", () => {
     for (const cell of ["=HYPERLINK(1)", "+1", "-1", "@SUM(A1)", "\tx", "\rx"]) expect(csvRow([cell]).replace(/^"/, "")).toMatch(/^'/);
     expect(csvRow(["line\nbreak"])).toBe('"line\nbreak"');
   });
+
+  it("keeps a cell with a semicolon as one quoted field", () => {
+    expect(csvRow(["a;b"])).toBe('"a;b"');
+    expect(csvRow(["x;=1+1", "ok"])).toBe('"x;=1+1",ok');
+    expect(csvRow(['=a;"b"'])).toBe('"\'=a;""b"""');
+  });
 });
 
 describe("display name in sign-up text", () => {
